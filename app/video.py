@@ -66,7 +66,6 @@ def get_media_duration(file_path: str) -> float:
 def validate_video(file_path: str):
 
     if not os.path.exists(file_path):
-
         raise FileNotFoundError(
             f"Video not found: {file_path}"
         )
@@ -76,7 +75,6 @@ def validate_video(file_path: str):
     )
 
     if duration <= 0:
-
         raise RuntimeError(
             f"Invalid video: {file_path}"
         )
@@ -103,7 +101,7 @@ def generate_video(
     )
 
     # ---------------------------------------------------------
-    # FIND CLIPS
+    # FIND ALL FOOTAGE
     # ---------------------------------------------------------
 
     all_clips = []
@@ -228,7 +226,7 @@ def generate_video(
     )
 
     # ---------------------------------------------------------
-    # EACH CLIP
+    # EACH CLIP DURATION
     # ---------------------------------------------------------
 
     clip_duration = (
@@ -243,7 +241,7 @@ def generate_video(
     )
 
     # ---------------------------------------------------------
-    # TEMPORARY 1080P CONCAT FILE
+    # TEMPORARY 1080P FILE
     # ---------------------------------------------------------
 
     temp_concat = os.path.join(
@@ -262,8 +260,7 @@ def generate_video(
     # ---------------------------------------------------------
     # STEP 1
     #
-    # Process all five clips at 1080x1920.
-    # This keeps Railway memory usage much lower.
+    # Create the 5-clip sequence at 1080x1920.
     # ---------------------------------------------------------
 
     filter_parts = []
@@ -344,7 +341,7 @@ def generate_video(
         "veryfast",
 
         "-crf",
-        "20",
+        "21",
 
         "-pix_fmt",
         "yuv420p",
@@ -393,8 +390,7 @@ def generate_video(
     # ---------------------------------------------------------
     # STEP 2
     #
-    # Upscale the completed 1080p sequence to 2160x3840.
-    # Add sharpening and CTA arrow only here.
+    # Final 4K upscale + sharpening + CTA arrow.
     # ---------------------------------------------------------
 
     output_path = os.path.join(
@@ -414,7 +410,7 @@ def generate_video(
         "[0:v]"
         "scale=2160:3840:"
         "flags=lanczos,"
-        "unsharp=5:5:0.55:5:5:0,"
+        "unsharp=5:5:0.45:5:5:0,"
         "eq=contrast=1.02:saturation=1.03,"
         "drawtext="
         "fontfile=/usr/share/fonts/truetype/"
@@ -422,8 +418,8 @@ def generate_video(
         "text='↓':"
         "fontcolor=white:"
         "bordercolor=black:"
-        "borderw=12:"
-        "fontsize=300:"
+        "borderw=10:"
+        "fontsize=260:"
         "x=(w-text_w)/2:"
         "y=3000:"
         f"enable='between(t,{cta_start:.3f},{cta_end:.3f})'"
@@ -456,16 +452,10 @@ def generate_video(
         "libx264",
 
         "-preset",
-        "medium",
+        "veryfast",
 
         "-crf",
-        "19",
-
-        "-profile:v",
-        "high",
-
-        "-level",
-        "5.2",
+        "23",
 
         "-pix_fmt",
         "yuv420p",
@@ -474,7 +464,7 @@ def generate_video(
         "aac",
 
         "-b:a",
-        "192k",
+        "128k",
 
         "-ar",
         "44100",
@@ -557,7 +547,7 @@ def generate_video(
     )
 
     # ---------------------------------------------------------
-    # CLEAN TEMP FILE
+    # REMOVE TEMPORARY FILE
     # ---------------------------------------------------------
 
     try:
