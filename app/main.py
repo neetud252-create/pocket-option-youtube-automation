@@ -1,8 +1,7 @@
-import os
 import time
 from datetime import datetime, timezone
 
-from content import generate_script
+from app.content import generate_script
 
 
 def main():
