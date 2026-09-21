@@ -11,7 +11,8 @@ You create short-form YouTube content for an AI trading-bot channel.
 Create educational and demonstration-oriented YouTube Shorts.
 
 Rules:
-- Script length: approximately 20-35 seconds when spoken naturally.
+- Script should be approximately 20-35 seconds when spoken naturally.
+- Target approximately 55-80 words.
 - Start with a strong hook.
 - Use simple, natural spoken English.
 - Explain ONE clear topic per Short.
@@ -30,7 +31,6 @@ Rules:
 
 def generate_script(topic: str, previous_topics=None) -> str:
 
-    # Get the API key securely from Railway Variables.
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
@@ -38,7 +38,6 @@ def generate_script(topic: str, previous_topics=None) -> str:
             "GEMINI_API_KEY is not configured in Railway."
         )
 
-    # Create Gemini client.
     client = genai.Client(api_key=api_key)
 
     previous = ", ".join(previous_topics or []) or "None"
@@ -54,22 +53,22 @@ Topic:
 Previously used topics:
 {previous}
 
+The script must be approximately 55-80 words.
+
 Important:
-Do not reuse the same hook, explanation, or CTA from the previous topics.
+- Do not reuse the same hook, explanation, or CTA from previous topics.
+- Do not include a title.
+- Do not include hashtags.
+- Do not include scene directions.
+- Do not include timestamps.
+- Do not include quotation marks.
+- Do not include labels.
 
 Return ONLY the spoken script.
-Do not include:
-- title
-- hashtags
-- scene directions
-- timestamps
-- quotation marks
-- labels
 """
 
     last_error = None
 
-    # Retry temporary Gemini errors.
     for attempt in range(3):
 
         try:
@@ -91,9 +90,17 @@ Do not include:
 
             script = response.text.strip()
 
-            if len(script) < 30:
+            word_count = len(script.split())
+
+            print(
+                f"Gemini generated {word_count} words.",
+                flush=True,
+            )
+
+            if word_count < 35:
                 raise RuntimeError(
-                    "Gemini returned a script that is too short."
+                    f"Gemini returned only {word_count} words. "
+                    "Expected at least 35 words."
                 )
 
             return script
@@ -107,10 +114,8 @@ Do not include:
                 flush=True,
             )
 
-            # Exponential backoff:
-            # attempt 1 -> 5 seconds
-            # attempt 2 -> 10 seconds
             if attempt < 2:
+
                 delay = 5 * (2 ** attempt)
 
                 print(
