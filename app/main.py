@@ -1,24 +1,83 @@
+import os
 import time
+import threading
 from datetime import datetime, timezone
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 from app.content import generate_script
 from app.voice import generate_voice
 from app.video import generate_video
 
 
+OUTPUT_DIR = "/app/output"
+
+
+class VideoHandler(SimpleHTTPRequestHandler):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(
+            *args,
+            directory=OUTPUT_DIR,
+            **kwargs
+        )
+
+
+def start_video_server():
+
+    port = int(
+        os.getenv("PORT", "8080")
+    )
+
+    server = ThreadingHTTPServer(
+        ("0.0.0.0", port),
+        VideoHandler
+    )
+
+    print(
+        f"Video server running on port {port}",
+        flush=True
+    )
+
+    server.serve_forever()
+
+
 def main():
 
     print("=" * 60, flush=True)
-    print("Pocket Option YouTube Automation", flush=True)
-    print("Testing Gemini + Piper + Video Generator...", flush=True)
+    print(
+        "Pocket Option YouTube Automation",
+        flush=True
+    )
+    print(
+        "Testing Gemini + Piper + Video Generator...",
+        flush=True
+    )
     print("=" * 60, flush=True)
 
-    topic = "How an AI trading bot analyzes a trading chart"
+    # --------------------------------
+    # START VIDEO SERVER
+    # --------------------------------
+
+    server_thread = threading.Thread(
+        target=start_video_server,
+        daemon=True
+    )
+
+    server_thread.start()
+
+    # --------------------------------
+    # TEST TOPIC
+    # --------------------------------
+
+    topic = (
+        "How an AI trading bot analyzes "
+        "a trading chart"
+    )
 
     try:
 
         # --------------------------------
-        # STEP 1: Generate Gemini script
+        # 1. GEMINI
         # --------------------------------
 
         print(
@@ -26,7 +85,9 @@ def main():
             flush=True
         )
 
-        script = generate_script(topic)
+        script = generate_script(
+            topic
+        )
 
         print(
             "\n===== GENERATED SCRIPT =====",
@@ -44,7 +105,7 @@ def main():
         )
 
         # --------------------------------
-        # STEP 2: Generate Piper voice
+        # 2. PIPER
         # --------------------------------
 
         print(
@@ -63,7 +124,7 @@ def main():
         )
 
         # --------------------------------
-        # STEP 3: Generate YouTube Short
+        # 3. VIDEO
         # --------------------------------
 
         print(
@@ -87,6 +148,16 @@ def main():
             flush=True
         )
 
+        print(
+            "\nVIDEO URL PATH:",
+            flush=True
+        )
+
+        print(
+            "/test_short.mp4",
+            flush=True
+        )
+
     except Exception as e:
 
         print(
@@ -99,7 +170,10 @@ def main():
             flush=True
         )
 
-    # Keep Railway service running.
+    # --------------------------------
+    # KEEP RAILWAY RUNNING
+    # --------------------------------
+
     while True:
 
         print(
