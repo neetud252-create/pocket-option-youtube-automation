@@ -4,7 +4,6 @@ import threading
 from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
-from app.content import generate_script
 from app.voice import generate_voice
 from app.video import generate_video
 
@@ -24,9 +23,7 @@ class VideoHandler(SimpleHTTPRequestHandler):
 
 def start_video_server():
 
-    port = int(
-        os.getenv("PORT", "8080")
-    )
+    port = int(os.getenv("PORT", "8080"))
 
     server = ThreadingHTTPServer(
         ("0.0.0.0", port),
@@ -45,18 +42,10 @@ def main():
 
     print("=" * 60, flush=True)
     print(
-        "Pocket Option YouTube Automation",
-        flush=True
-    )
-    print(
-        "Testing Gemini + Piper + Video Generator...",
+        "10-CLIP MIX TEST",
         flush=True
     )
     print("=" * 60, flush=True)
-
-    # --------------------------------
-    # START VIDEO SERVER
-    # --------------------------------
 
     server_thread = threading.Thread(
         target=start_video_server,
@@ -65,32 +54,25 @@ def main():
 
     server_thread.start()
 
-    # --------------------------------
-    # TEST TOPIC
-    # --------------------------------
+    # TEMPORARY TEST SCRIPT
+    # Gemini is intentionally bypassed because
+    # the current free-tier quota is exhausted.
 
-    topic = (
-        "How an AI trading bot analyzes "
-        "a trading chart"
+    script = (
+        "Ever wondered how an AI trading bot reads a chart? "
+        "Instead of watching every price movement manually, "
+        "the system can analyze chart patterns, support and "
+        "resistance levels, and other market information. "
+        "Understanding how these elements work together can "
+        "help you better understand what the bot is analyzing. "
+        "Watch the related tutorial to see how the complete "
+        "setup works."
     )
 
     try:
 
-        # --------------------------------
-        # 1. GEMINI
-        # --------------------------------
-
         print(
-            "\n[1/3] Generating Gemini script...",
-            flush=True
-        )
-
-        script = generate_script(
-            topic
-        )
-
-        print(
-            "\n===== GENERATED SCRIPT =====",
+            "\n===== TEST SCRIPT =====",
             flush=True
         )
 
@@ -100,16 +82,12 @@ def main():
         )
 
         print(
-            "============================",
+            "======================",
             flush=True
         )
 
-        # --------------------------------
-        # 2. PIPER
-        # --------------------------------
-
         print(
-            "\n[2/3] Generating Piper voice...",
+            "\n[1/2] Generating Piper voice...",
             flush=True
         )
 
@@ -123,12 +101,8 @@ def main():
             flush=True
         )
 
-        # --------------------------------
-        # 3. VIDEO
-        # --------------------------------
-
         print(
-            "\n[3/3] Generating YouTube Short...",
+            "\n[2/2] Generating 10-CLIP Short...",
             flush=True
         )
 
@@ -139,7 +113,7 @@ def main():
         )
 
         print(
-            "\n===== VIDEO TEST: SUCCESS =====",
+            "\n===== 10-CLIP TEST SUCCESS =====",
             flush=True
         )
 
@@ -149,19 +123,14 @@ def main():
         )
 
         print(
-            "\nVIDEO URL PATH:",
-            flush=True
-        )
-
-        print(
-            "/test_short.mp4",
+            "Open /test_short.mp4 on the Railway domain.",
             flush=True
         )
 
     except Exception as e:
 
         print(
-            "\n===== VIDEO TEST: FAILED =====",
+            "\n===== 10-CLIP TEST FAILED =====",
             flush=True
         )
 
@@ -169,10 +138,6 @@ def main():
             f"Error: {e}",
             flush=True
         )
-
-    # --------------------------------
-    # KEEP RAILWAY RUNNING
-    # --------------------------------
 
     while True:
 
