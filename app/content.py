@@ -9,45 +9,59 @@ MODEL_NAME = "gemini-3.5-flash"
 
 
 SYSTEM_PROMPT = """
-You are an expert YouTube Shorts scriptwriter.
+You are a professional YouTube Shorts scriptwriter.
 
-Create short educational YouTube Shorts for an AI trading-bot channel.
+Write a COMPLETE spoken script for an educational YouTube Short about
+an AI trading bot.
 
-The purpose of each Short is to attract interested viewers and send them
-to one longer YouTube tutorial through the YouTube Related Video feature.
+The Short is designed to send interested viewers to ONE longer tutorial
+through YouTube's Related Video feature.
 
 The longer tutorial explains how to use the AI trading bot for trading.
 
-IMPORTANT WRITING RULES:
+STRICT LENGTH:
+The final script MUST contain 55 to 80 words.
+Target approximately 65 words.
 
-- The script MUST contain 55 to 80 words.
-- Write approximately 65 words.
-- Never write fewer than 55 words.
-- Use natural spoken English.
-- The script should sound like a real human creator.
-- Start with a strong hook.
-- Explain ONE useful concept.
-- Give the viewer a useful takeaway.
-- Create curiosity about the complete bot setup.
-- End with a natural CTA toward the related tutorial.
-- Do not explain the entire tutorial in the Short.
-- Do not use the word "subscribe" as the main CTA.
-- Vary hooks and CTA wording between scripts.
+Write ONE natural paragraph.
 
-TRADING SAFETY:
+The script must contain:
 
-- Never promise profits.
-- Never guarantee winning trades.
-- Never claim guaranteed signals.
-- Never claim the bot cannot lose.
-- Never invent win rates.
-- Never invent profits or results.
-- Never fabricate screenshots or statistics.
-- Never imply viewers will definitely make money.
-- Do not use fake urgency.
-- Do not use misleading clickbait.
+1. A strong hook.
+2. A useful explanation of ONE concept.
+3. A practical takeaway.
+4. A natural transition toward the related tutorial.
 
-Return ONLY the spoken script.
+The final sentence should encourage interested viewers to open the
+related tutorial.
+
+Use natural spoken English.
+
+Vary the hook and CTA between scripts.
+
+Never:
+- promise profits
+- guarantee winning trades
+- guarantee signals
+- claim the bot cannot lose
+- invent statistics
+- invent profits
+- invent trading results
+- fabricate screenshots
+- fabricate testimonials
+- use fake urgency
+- use misleading clickbait
+- make financial guarantees
+
+Do not write a title.
+Do not write hashtags.
+Do not write bullet points.
+Do not write labels.
+Do not write scene directions.
+Do not write timestamps.
+Do not put the script inside quotation marks.
+
+Return ONLY the complete spoken script.
 """
 
 
@@ -66,56 +80,33 @@ def generate_script(topic: str, previous_topics=None) -> str:
 
     previous = ", ".join(
         previous_topics or []
-    ) or "None"
+    )
+
+    if not previous:
+        previous = "None"
 
     prompt = f"""
 {SYSTEM_PROMPT}
 
-Create ONE YouTube Short script about:
-
+TOPIC:
 {topic}
 
-Previously used topics:
+PREVIOUSLY USED TOPICS:
 {previous}
 
-The script MUST follow this exact structure:
-
-HOOK:
-Start with an interesting question, surprising observation,
-or strong statement.
-
-EXPLANATION:
-Explain one useful concept about AI trading bots,
-chart analysis, indicators, automation, or trading.
-
-TAKEAWAY:
-Give the viewer one useful thing they can understand or remember.
-
-CTA:
-Direct interested viewers to the related long-form tutorial,
-where the complete bot setup and usage is explained.
-
-WORD COUNT REQUIREMENT:
-
-Write between 55 and 80 words.
-
-TARGET: approximately 65 words.
+Now write the complete Short.
 
 IMPORTANT:
-Do NOT stop after one sentence.
-Do NOT summarize the topic in one sentence.
-Complete all four parts naturally in one spoken paragraph.
+Do not give me an outline.
+Do not give me a summary.
+Do not give me instructions about writing.
 
-Do not include:
-- title
-- hashtags
-- labels
-- bullet points
-- timestamps
-- scene directions
-- quotation marks
+I need the FINAL spoken script itself.
 
-Return ONLY the complete spoken script.
+The final answer must be between 55 and 80 words.
+Target approximately 65 words.
+
+Write the complete script now.
 """
 
     last_error = None
@@ -133,12 +124,15 @@ Return ONLY the complete spoken script.
                 model=MODEL_NAME,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    max_output_tokens=500,
-                    temperature=0.8,
+                    max_output_tokens=1000,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level="minimal"
+                    ),
                 ),
             )
 
             if not response.text:
+
                 raise RuntimeError(
                     "Gemini returned an empty response."
                 )
@@ -160,12 +154,14 @@ Return ONLY the complete spoken script.
             )
 
             if word_count < 55:
+
                 raise RuntimeError(
                     f"Gemini returned only {word_count} words. "
                     "Expected 55-80 words."
                 )
 
             if word_count > 80:
+
                 raise RuntimeError(
                     f"Gemini returned {word_count} words. "
                     "Expected 55-80 words."
