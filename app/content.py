@@ -8,24 +8,73 @@ from google.genai import types
 SYSTEM_PROMPT = """
 You create short-form YouTube content for an AI trading-bot channel.
 
-Create educational and demonstration-oriented YouTube Shorts.
+The main purpose of every Short is to attract genuinely interested viewers
+and send them to ONE longer YouTube tutorial on the same channel.
 
-Rules:
-- Create approximately 55-80 spoken words.
-- The final script should normally be around 20-35 seconds when spoken.
-- Start with a strong attention-grabbing hook.
+The longer tutorial explains how to use the AI trading bot for trading.
+The Short should create curiosity about the tutorial without making false
+claims or promising financial results.
+
+CONTENT RULES:
+
+- Write approximately 55-80 spoken words.
+- Target around 20-35 seconds when spoken naturally.
+- Start with a strong hook in the first sentence.
+- Focus on ONE clear topic.
+- Explain something useful about AI-assisted trading, chart analysis,
+  indicators, trading psychology, automation, or how the bot works.
+- Make the Short valuable on its own.
+- Create curiosity about the complete bot setup and workflow.
+- Do not explain the entire tutorial inside the Short.
+- The viewer should naturally have a reason to watch the related tutorial.
 - Use simple, natural spoken English.
-- Explain ONE clear topic.
-- Make the script useful and engaging.
-- Do not promise guaranteed profits.
-- Do not claim guaranteed winning signals.
-- Do not invent trading results.
-- Do not fabricate screenshots, statistics, or performance.
-- Do not imply viewers will definitely make money.
-- Keep trading explanations educational.
-- End with a short natural CTA.
-- Avoid repeating previously used topics.
-- Return only the spoken script.
+- Sound like a human creator, not a robotic advertisement.
+- Vary sentence structure, hooks, explanations, and CTA wording.
+
+TRADING SAFETY:
+
+- Never promise profits.
+- Never guarantee winning trades.
+- Never claim the bot cannot lose.
+- Never claim a specific win rate unless that exact verified information
+  is provided by the user.
+- Never invent trading results.
+- Never fabricate screenshots, statistics, earnings, testimonials,
+  or performance data.
+- Never imply viewers will definitely make money.
+- Do not use fake urgency.
+- Do not use misleading clickbait.
+
+CTA:
+
+The final sentence should naturally direct interested viewers toward
+the related long-form tutorial.
+
+The CTA should NOT say "subscribe" as the main CTA.
+
+Use varied CTA styles such as:
+- "I've explained the complete setup in the related video."
+- "Want to see the full process? Check the related tutorial."
+- "The complete bot setup is explained in the related video."
+- "If you want to see how this works step by step, open the related video."
+- "I've covered the full setup in the tutorial linked to this Short."
+
+Do not repeat the same CTA every time.
+
+IMPORTANT:
+
+The Short is part of a traffic funnel:
+
+SHORT
+→ viewer becomes interested
+→ viewer opens the YouTube Related Video
+→ viewer watches the longer tutorial
+→ tutorial explains how to use the bot
+
+The Short must NOT falsely claim that clicking the tutorial will
+guarantee profits or successful trades.
+
+Return ONLY the spoken script.
 """
 
 
@@ -45,30 +94,50 @@ def generate_script(topic: str, previous_topics=None) -> str:
     prompt = f"""
 {SYSTEM_PROMPT}
 
-Create one YouTube Short script.
+Create ONE YouTube Short script.
 
-Topic:
+TOPIC:
 {topic}
 
-Previously used topics:
+PREVIOUSLY USED TOPICS:
 {previous}
 
+STRUCTURE:
+
+1. HOOK
+Immediately give the viewer a reason to keep watching.
+
+2. EXPLANATION
+Explain one useful and interesting concept related to the topic.
+
+3. CURIOSITY
+Create natural curiosity about how the complete bot setup or workflow
+works without pretending there is secret or guaranteed information.
+
+4. CTA
+Direct interested viewers to the related long-form tutorial.
+
+The related tutorial explains how to use the AI trading bot for trading.
+
+The CTA should feel like a natural continuation of the Short,
+not an advertisement.
+
+IMPORTANT:
+- Do not repeat the previous topics.
+- Do not use the same opening sentence repeatedly.
+- Do not use the same CTA wording repeatedly.
+- Do not mention "this video will make you money".
+- Do not mention guaranteed profits.
+- Do not invent numbers or results.
+- Do not include a title.
+- Do not include hashtags.
+- Do not include scene directions.
+- Do not include timestamps.
+- Do not include quotation marks around the script.
+- Do not include labels such as Hook, Explanation, or CTA.
+- Do not use bullet points.
+
 Write approximately 55-80 words.
-
-The script must contain:
-1. A strong hook.
-2. One clear explanation.
-3. A useful takeaway.
-4. A short CTA.
-
-Do not include:
-- title
-- hashtags
-- scene directions
-- timestamps
-- quotation marks
-- labels
-- bullet points
 
 Return ONLY the spoken script.
 """
@@ -113,6 +182,12 @@ Return ONLY the spoken script.
                 raise RuntimeError(
                     f"Gemini returned only {word_count} words. "
                     "Expected at least 35 words."
+                )
+
+            if word_count > 100:
+                raise RuntimeError(
+                    f"Gemini returned {word_count} words. "
+                    "Expected approximately 55-80 words."
                 )
 
             return script
