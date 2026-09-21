@@ -1,4 +1,5 @@
 import os
+import random
 import subprocess
 
 
@@ -18,10 +19,6 @@ OUTPUT_DIR = os.path.join(
     BASE_DIR,
     "output"
 )
-
-# TEST MODE
-# We are deliberately using one known clip first.
-TEST_FOOTAGE = "01_chart_overview.mp4"
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -58,7 +55,7 @@ def validate_video(video_path: str):
 
     if not os.path.exists(video_path):
         raise FileNotFoundError(
-            f"Test footage not found: {video_path}"
+            f"Footage not found: {video_path}"
         )
 
     print(
@@ -76,7 +73,7 @@ def validate_video(video_path: str):
         "-show_entries",
         "stream=codec_name,width,height,duration",
         "-of",
-        "default=noprint_wrappers=1",
+        "default=noprint_wrappers=1:nokey=0",
         video_path,
     ]
 
@@ -99,11 +96,6 @@ def validate_video(video_path: str):
 
     print(
         "Footage validation successful.",
-        flush=True
-    )
-
-    print(
-        result.stdout.strip(),
         flush=True
     )
 
@@ -130,21 +122,53 @@ def generate_video(
     )
 
     # --------------------------------
-    # TEST FOOTAGE
+    # FIND ALL FOOTAGE
     # --------------------------------
 
-    selected_clip = os.path.join(
-        FOOTAGE_DIR,
-        TEST_FOOTAGE
-    )
+    clips = []
+
+    for filename in os.listdir(FOOTAGE_DIR):
+
+        if filename.lower().endswith(".mp4"):
+
+            clips.append(
+                os.path.join(
+                    FOOTAGE_DIR,
+                    filename
+                )
+            )
+
+    if len(clips) < 10:
+        raise RuntimeError(
+            f"Expected at least 10 MP4 clips, "
+            f"but found only {len(clips)}."
+        )
+
+    # Use exactly 10 clips.
+    clips = clips[:10]
+
+    # Randomize order for every generated Short.
+    random.shuffle(clips)
 
     print(
-        f"Using TEST footage: {TEST_FOOTAGE}",
+        "\n===== SELECTED FOOTAGE =====",
         flush=True
     )
 
-    validate_video(
-        selected_clip
+    for index, clip in enumerate(
+        clips,
+        start=1
+    ):
+        print(
+            f"{index}. {os.path.basename(clip)}",
+            flush=True
+        )
+
+        validate_video(clip)
+
+    print(
+        "============================",
+        flush=True
     )
 
     # --------------------------------
@@ -161,6 +185,18 @@ def generate_video(
         flush=True
     )
 
+    # Each of the 10 clips gets an equal
+    # section of the Short.
+    segment_duration = (
+        audio_duration / len(clips)
+    )
+
+    print(
+        f"Each clip duration: "
+        f"{segment_duration:.2f} seconds",
+        flush=True
+    )
+
     # --------------------------------
     # OUTPUT
     # --------------------------------
@@ -171,35 +207,79 @@ def generate_video(
     )
 
     # --------------------------------
-    # FFMPEG
+    # FFMPEG INPUTS
     # --------------------------------
 
     command = [
         "ffmpeg",
         "-y",
+    ]
 
-        "-stream_loop",
-        "-1",
+    # Add all 10 video inputs.
+    # stream_loop allows a short source clip
+    # to continue long enough for its segment.
+    for clip in clips:
 
-        "-i",
-        selected_clip,
+        command.extend([
+            "-stream_loop",
+            "-1",
+            "-i",
+            clip,
+        ])
 
+    # Add voiceover.
+    command.extend([
         "-i",
         voice_path,
+    ])
+
+    # --------------------------------
+    # FILTER GRAPH
+    # --------------------------------
+
+    filter_parts = []
+
+    for index in range(len(clips)):
+
+        filter_parts.append(
+            f"[{index}:v]"
+            f"trim=duration={segment_duration},"
+            f"setpts=PTS-STARTPTS,"
+            f"scale=1080:1920:"
+            f"force_original_aspect_ratio=increase,"
+            f"crop=1080:1920,"
+            f"setsar=1,"
+            f"format=yuv420p"
+            f"[v{index}]"
+        )
+
+    video_inputs = "".join(
+        f"[v{i}]"
+        for i in range(len(clips))
+    )
+
+    filter_parts.append(
+        f"{video_inputs}"
+        f"concat=n={len(clips)}:v=1:a=0,"
+        f"format=yuv420p"
+        f"[finalvideo]"
+    )
+
+    filter_complex = ";".join(
+        filter_parts
+    )
+
+    audio_index = len(clips)
+
+    command.extend([
+        "-filter_complex",
+        filter_complex,
 
         "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0",
+        "[finalvideo]",
 
-        "-vf",
-        (
-            "scale=1080:1920:"
-            "force_original_aspect_ratio=increase,"
-            "crop=1080:1920,"
-            "setsar=1,"
-            "format=yuv420p"
-        ),
+        "-map",
+        f"{audio_index}:a:0",
 
         "-t",
         str(audio_duration),
@@ -225,10 +305,10 @@ def generate_video(
         "-shortest",
 
         output_path,
-    ]
+    ])
 
     print(
-        "Rendering vertical YouTube Short...",
+        "\nRendering MIXED 10-CLIP YouTube Short...",
         flush=True
     )
 
@@ -251,16 +331,11 @@ def generate_video(
         )
 
         raise RuntimeError(
-            "FFmpeg failed to render the video."
+            "FFmpeg failed to render the mixed video."
         )
 
-    print(
-        f"Video generated: {output_path}",
-        flush=True
-    )
-
     # --------------------------------
-    # FINAL OUTPUT VALIDATION
+    # VALIDATE OUTPUT
     # --------------------------------
 
     if not os.path.exists(output_path):
@@ -285,7 +360,12 @@ def generate_video(
         )
 
     print(
-        "VIDEO RENDER TEST: SUCCESS",
+        "\n===== 10-CLIP VIDEO TEST: SUCCESS =====",
+        flush=True
+    )
+
+    print(
+        f"Final video: {output_path}",
         flush=True
     )
 
