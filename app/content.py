@@ -11,17 +11,17 @@ You create short-form YouTube content for an AI trading-bot channel.
 Create educational and demonstration-oriented YouTube Shorts.
 
 Rules:
-- Script should be approximately 20-35 seconds when spoken naturally.
-- Target approximately 55-80 words.
-- Start with a strong hook.
+- Create approximately 55-80 spoken words.
+- The final script should normally be around 20-35 seconds when spoken.
+- Start with a strong attention-grabbing hook.
 - Use simple, natural spoken English.
-- Explain ONE clear topic per Short.
-- Make the script engaging without using fake claims.
+- Explain ONE clear topic.
+- Make the script useful and engaging.
 - Do not promise guaranteed profits.
 - Do not claim guaranteed winning signals.
 - Do not invent trading results.
 - Do not fabricate screenshots, statistics, or performance.
-- Do not imply that viewers will definitely make money.
+- Do not imply viewers will definitely make money.
 - Keep trading explanations educational.
 - End with a short natural CTA.
 - Avoid repeating previously used topics.
@@ -53,16 +53,22 @@ Topic:
 Previously used topics:
 {previous}
 
-The script must be approximately 55-80 words.
+Write approximately 55-80 words.
 
-Important:
-- Do not reuse the same hook, explanation, or CTA from previous topics.
-- Do not include a title.
-- Do not include hashtags.
-- Do not include scene directions.
-- Do not include timestamps.
-- Do not include quotation marks.
-- Do not include labels.
+The script must contain:
+1. A strong hook.
+2. One clear explanation.
+3. A useful takeaway.
+4. A short CTA.
+
+Do not include:
+- title
+- hashtags
+- scene directions
+- timestamps
+- quotation marks
+- labels
+- bullet points
 
 Return ONLY the spoken script.
 """
@@ -77,9 +83,10 @@ Return ONLY the spoken script.
                 model="gemini-3.8-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.8,
-                    max_output_tokens=180,
-                    candidate_count=1,
+                    max_output_tokens=500,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level="low"
+                    ),
                 ),
             )
 
@@ -94,6 +101,11 @@ Return ONLY the spoken script.
 
             print(
                 f"Gemini generated {word_count} words.",
+                flush=True,
+            )
+
+            print(
+                f"Gemini script: {script}",
                 flush=True,
             )
 
