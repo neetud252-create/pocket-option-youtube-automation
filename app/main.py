@@ -60,6 +60,10 @@ def main():
         exist_ok=True
     )
 
+    # ---------------------------------------------------------
+    # START VIDEO SERVER
+    # ---------------------------------------------------------
+
     server_thread = threading.Thread(
         target=start_video_server,
         daemon=True
@@ -69,20 +73,24 @@ def main():
 
     # ---------------------------------------------------------
     # TEMPORARY TEST SCRIPT
-    # Gemini is bypassed because its current free quota
-    # is exhausted.
+    #
+    # Gemini is bypassed temporarily because the current
+    # free-tier quota is exhausted.
     # ---------------------------------------------------------
 
     bot_text = (
         "An AI trading bot can study candlestick patterns "
         "and price movement to organize the information "
-        "you see on a trading chart."
+        "you see on a trading chart. "
+        "It can also help analyze different parts "
+        "of the chart in a structured way."
     )
 
     cta_text = (
         "Want to see how the complete setup works? "
         "Tap the Related Video below the title "
-        "to watch the full tutorial."
+        "to watch the full tutorial and see the "
+        "full bot setup step by step."
     )
 
     full_script = (
@@ -90,6 +98,10 @@ def main():
         + " "
         + cta_text
     )
+
+    # ---------------------------------------------------------
+    # PRINT SCRIPT
+    # ---------------------------------------------------------
 
     print(
         "\n===== BOT PART =====",
@@ -121,7 +133,17 @@ def main():
         flush=True
     )
 
+    print(
+        "\nWord count:",
+        len(full_script.split()),
+        flush=True
+    )
+
     try:
+
+        # -----------------------------------------------------
+        # 1. GENERATE ENHANCED PIPER VOICE
+        # -----------------------------------------------------
 
         print(
             "\n[1/2] Generating enhanced Piper voice...",
@@ -137,6 +159,10 @@ def main():
             f"Voice created: {voice_path}",
             flush=True
         )
+
+        # -----------------------------------------------------
+        # 2. GENERATE 4K 5-CLIP VIDEO
+        # -----------------------------------------------------
 
         print(
             "\n[2/2] Generating 4K 5-clip Short...",
@@ -195,6 +221,10 @@ def main():
             f"Error: {e}",
             flush=True
         )
+
+    # ---------------------------------------------------------
+    # KEEP RAILWAY ALIVE
+    # ---------------------------------------------------------
 
     while True:
 
