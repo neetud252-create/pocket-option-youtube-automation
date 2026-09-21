@@ -1,29 +1,34 @@
-"""
-Pocket Option YouTube Automation
-Initial Railway health/startup service.
-
-This is intentionally a small first deployment step.
-The real content-generation and YouTube upload modules will be added
-after the Railway service starts successfully.
-"""
-
 import os
 import time
 from datetime import datetime, timezone
 
+from content import generate_script
 
-def main() -> None:
+
+def main():
     print("=" * 60, flush=True)
     print("Pocket Option YouTube Automation", flush=True)
-    print("Service started successfully.", flush=True)
-    print(f"UTC time: {datetime.now(timezone.utc).isoformat()}", flush=True)
-    print("Waiting for the next automation module...", flush=True)
+    print("Testing Gemini API...", flush=True)
     print("=" * 60, flush=True)
 
-    # Keep the Railway service alive while we build the automation.
+    topic = "How an AI trading bot analyzes a trading chart"
+
+    try:
+        script = generate_script(topic)
+
+        print("\n===== GEMINI GENERATED SCRIPT =====", flush=True)
+        print(script, flush=True)
+        print("===== END SCRIPT =====\n", flush=True)
+
+        print("GEMINI TEST: SUCCESS", flush=True)
+
+    except Exception as e:
+        print("GEMINI TEST: FAILED", flush=True)
+        print(f"Error: {e}", flush=True)
+
     while True:
         print(
-            f"[HEARTBEAT] Service running: "
+            f"[HEARTBEAT] Running: "
             f"{datetime.now(timezone.utc).isoformat()}",
             flush=True,
         )
