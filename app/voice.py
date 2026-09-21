@@ -74,7 +74,7 @@ def generate_voice(
     )
 
     print(
-        "Generating slower male voice...",
+        "Generating natural male voice...",
         flush=True
     )
 
@@ -88,37 +88,62 @@ def generate_voice(
             wav_file
         )
 
-    # --------------------------------
-    # DEEPER + SLOWER VOICE
-    # --------------------------------
+    # ---------------------------------------------------------
+    # PROFESSIONAL VOICE PROCESSING
+    #
+    # 1. Slightly lower pitch
+    # 2. Slow the voice naturally
+    # 3. Remove unnecessary low rumble
+    # 4. Add controlled low-mid warmth
+    # 5. Improve vocal clarity
+    # 6. Compress the voice
+    # 7. Dynamically normalize volume
+    # 8. Final loudness normalization
+    # ---------------------------------------------------------
 
-    # Lower pitch slightly while preserving
-    # natural speech timing, then slow speech.
+    audio_filter = (
+        "asetrate=22050*0.96,"
+        "aresample=44100,"
+        "atempo=0.94,"
+        "highpass=f=70,"
+        "equalizer=f=120:t=q:w=0.9:g=2,"
+        "equalizer=f=250:t=q:w=1.0:g=1.5,"
+        "equalizer=f=3200:t=q:w=1.0:g=2,"
+        "equalizer=f=6500:t=q:w=1.0:g=-1,"
+        "acompressor="
+        "threshold=-18dB:"
+        "ratio=2.5:"
+        "attack=8:"
+        "release=100:"
+        "makeup=2,"
+        "dynaudnorm="
+        "f=150:"
+        "g=7:"
+        "p=0.92,"
+        "loudnorm="
+        "I=-14:"
+        "LRA=7:"
+        "TP=-1.5"
+    )
+
     command = [
         "ffmpeg",
         "-y",
-
         "-i",
         raw_output,
-
         "-af",
-        (
-            "asetrate=22050*0.94,"
-            "aresample=22050,"
-            "atempo=0.92"
-        ),
-
+        audio_filter,
         "-ar",
-        "22050",
-
+        "44100",
         "-ac",
         "1",
-
+        "-c:a",
+        "pcm_s16le",
         output_path,
     ]
 
     print(
-        "Applying deep and slow voice processing...",
+        "Applying professional voice enhancement...",
         flush=True
     )
 
@@ -136,18 +161,17 @@ def generate_voice(
         )
 
         raise RuntimeError(
-            "FFmpeg voice processing failed."
+            "FFmpeg voice enhancement failed."
         )
 
-    if not os.path.exists(
-        output_path
-    ):
+    if not os.path.exists(output_path):
+
         raise RuntimeError(
-            "Processed voice was not created."
+            "Enhanced voice was not created."
         )
 
     print(
-        f"Voice generated: {output_path}",
+        f"Enhanced voice created: {output_path}",
         flush=True
     )
 
