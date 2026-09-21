@@ -1,6 +1,7 @@
 import os
 import random
 import subprocess
+import json
 
 
 BASE_DIR = os.path.dirname(
@@ -21,13 +22,18 @@ OUTPUT_DIR = os.path.join(
 )
 
 
+TARGET_WIDTH = 2160
+TARGET_HEIGHT = 3840
+
+NUMBER_OF_CLIPS = 5
+
 MIN_DURATION = 15.0
 MAX_DURATION = 20.0
 
-CLIPS_PER_SHORT = 5
 
-
-def get_duration(file_path: str) -> float:
+def get_media_duration(
+    file_path: str
+) -> float:
 
     command = [
         "ffprobe",
@@ -36,8 +42,8 @@ def get_duration(file_path: str) -> float:
         "-show_entries",
         "format=duration",
         "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        file_path,
+        "json",
+        file_path
     ]
 
     result = subprocess.run(
@@ -48,140 +54,74 @@ def get_duration(file_path: str) -> float:
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"Could not read duration:\n"
-            f"{result.stderr}"
+            f"Could not read duration: {file_path}"
         )
+
+    data = json.loads(
+        result.stdout
+    )
 
     return float(
-        result.stdout.strip()
+        data["format"]["duration"]
     )
 
 
-def validate_video(video_path: str):
+def validate_video(
+    file_path: str
+):
 
-    if not os.path.exists(video_path):
+    if not os.path.exists(file_path):
         raise FileNotFoundError(
-            f"Footage not found: {video_path}"
+            f"Video not found: {file_path}"
         )
 
-    command = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=codec_name,width,height,duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=0",
-        video_path,
-    ]
-
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True
+    duration = get_media_duration(
+        file_path
     )
 
-    if result.returncode != 0:
+    if duration <= 0:
         raise RuntimeError(
-            f"Invalid video:\n"
-            f"{result.stderr}"
-        )
-
-    if not result.stdout.strip():
-        raise RuntimeError(
-            "Video does not contain a valid video stream."
+            f"Invalid video duration: {file_path}"
         )
 
     print(
-        f"Validated: "
-        f"{os.path.basename(video_path)}",
+        f"Validated: {os.path.basename(file_path)} "
+        f"({duration:.2f}s)",
         flush=True
     )
 
+    return duration
 
-def create_arrow_overlay(
-    output_path: str,
-    duration: float
-):
 
-    # Large animated downward arrow.
-    #
-    # It points toward the lower part of the
-    # Shorts player where the Related Video
-    # link can appear.
+def get_voice_duration(
+    voice_path: str
+) -> float:
 
-    command = [
-        "ffmpeg",
-        "-y",
-
-        "-f",
-        "lavfi",
-
-        "-i",
-        (
-            f"color=c=black@0.0:"
-            f"s=1080x1920:"
-            f"d={duration}:"
-            f"r=30"
-        ),
-
-        "-vf",
-        (
-            "format=rgba,"
-            "drawtext="
-            "fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
-            "text='↓':"
-            "fontcolor=white:"
-            "fontsize=150:"
-            "x=(w-text_w)/2:"
-            "y=1650"
-        ),
-
-        "-c:v",
-        "qtrle",
-
-        output_path,
-    ]
-
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True
+    return get_media_duration(
+        voice_path
     )
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            "Could not create arrow overlay:\n"
-            + result.stderr
-        )
 
 
 def generate_video(
     script: str,
     voice_path: str,
-    output_filename: str = "test_short.mp4"
+    output_filename: str = "short.mp4"
 ) -> str:
-
-    if not script:
-        raise ValueError(
-            "Script cannot be empty."
-        )
-
-    if not os.path.exists(voice_path):
-        raise FileNotFoundError(
-            f"Voice file not found: {voice_path}"
-        )
 
     os.makedirs(
         OUTPUT_DIR,
         exist_ok=True
     )
 
-    # --------------------------------
+    if not os.path.exists(FOOTAGE_DIR):
+        raise FileNotFoundError(
+            f"Footage directory not found: "
+            f"{FOOTAGE_DIR}"
+        )
+
+    # ---------------------------------------------------------
     # FIND ALL FOOTAGE
-    # --------------------------------
+    # ---------------------------------------------------------
 
     all_clips = []
 
@@ -200,20 +140,26 @@ def generate_video(
                 )
             )
 
-    if len(all_clips) < 10:
+    all_clips.sort()
 
+    print(
+        f"\nFound {len(all_clips)} MP4 clips.",
+        flush=True
+    )
+
+    if len(all_clips) < 10:
         raise RuntimeError(
-            f"Expected 10 footage clips, "
-            f"but found {len(all_clips)}."
+            f"Need at least 10 clips. "
+            f"Found {len(all_clips)}."
         )
 
-    # --------------------------------
-    # RANDOMLY SELECT EXACTLY 5
-    # --------------------------------
+    # ---------------------------------------------------------
+    # RANDOMLY SELECT EXACTLY 5 CLIPS
+    # ---------------------------------------------------------
 
     selected_clips = random.sample(
         all_clips,
-        CLIPS_PER_SHORT
+        NUMBER_OF_CLIPS
     )
 
     random.shuffle(
@@ -221,7 +167,7 @@ def generate_video(
     )
 
     print(
-        "\n===== RANDOM 5-CLIP SELECTION =====",
+        "\n===== SELECTED CLIPS =====",
         flush=True
     )
 
@@ -241,32 +187,29 @@ def generate_video(
         )
 
     print(
-        "====================================",
+        "==========================",
         flush=True
     )
 
-    # --------------------------------
+    # ---------------------------------------------------------
     # VOICE DURATION
-    # --------------------------------
+    # ---------------------------------------------------------
 
-    voice_duration = get_duration(
+    voice_duration = get_voice_duration(
         voice_path
     )
 
     print(
-        f"Voice duration: "
+        f"\nVoice duration: "
         f"{voice_duration:.2f} seconds",
         flush=True
     )
 
-    # We need the final video to be
-    # between 15 and 20 seconds.
+    # ---------------------------------------------------------
+    # TARGET VIDEO DURATION
     #
-    # If voice is longer than 20 seconds,
-    # this test uses the first 20 seconds.
-    #
-    # If voice is shorter than 15 seconds,
-    # the video follows the voice duration.
+    # Keep final Short between 15 and 20 seconds.
+    # ---------------------------------------------------------
 
     final_duration = min(
         voice_duration,
@@ -275,28 +218,50 @@ def generate_video(
 
     if final_duration < MIN_DURATION:
 
-        print(
-            f"Voice is shorter than "
-            f"{MIN_DURATION}s. "
-            f"Using {final_duration:.2f}s.",
-            flush=True
+        raise RuntimeError(
+            f"Voice is only "
+            f"{final_duration:.2f}s. "
+            f"Need at least {MIN_DURATION}s."
         )
 
-    else:
+    print(
+        f"Final Short duration target: "
+        f"{final_duration:.2f}s",
+        flush=True
+    )
 
-        print(
-            f"Final Short duration target: "
-            f"{final_duration:.2f}s",
-            flush=True
-        )
+    # ---------------------------------------------------------
+    # CTA TIMING
+    #
+    # Our script is intentionally divided approximately
+    # 50/50 between BOT explanation and CTA.
+    #
+    # Therefore the arrow appears during the second half.
+    # ---------------------------------------------------------
 
-    # --------------------------------
+    cta_start = final_duration * 0.50
+
+    cta_end = final_duration
+
+    print(
+        f"CTA starts at: "
+        f"{cta_start:.2f}s",
+        flush=True
+    )
+
+    print(
+        f"CTA ends at: "
+        f"{cta_end:.2f}s",
+        flush=True
+    )
+
+    # ---------------------------------------------------------
     # EACH CLIP DURATION
-    # --------------------------------
+    # ---------------------------------------------------------
 
     clip_duration = (
         final_duration /
-        CLIPS_PER_SHORT
+        NUMBER_OF_CLIPS
     )
 
     print(
@@ -305,24 +270,124 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------
+    # ---------------------------------------------------------
+    # BUILD FILTERS
+    # ---------------------------------------------------------
+
+    filter_parts = []
+
+    for index in range(
+        NUMBER_OF_CLIPS
+    ):
+
+        filter_parts.append(
+            (
+                f"[{index}:v]"
+                f"trim=duration={clip_duration:.4f},"
+                f"setpts=PTS-STARTPTS,"
+                f"scale={TARGET_WIDTH}:"
+                f"{TARGET_HEIGHT}:"
+                f"force_original_aspect_ratio=increase:"
+                f"flags=lanczos,"
+                f"crop={TARGET_WIDTH}:"
+                f"{TARGET_HEIGHT},"
+                f"setsar=1,"
+                f"unsharp="
+                f"5:5:0.65:"
+                f"5:5:0,"
+                f"eq="
+                f"contrast=1.02:"
+                f"saturation=1.03,"
+                f"format=yuv420p"
+                f"[v{index}]"
+            )
+        )
+
+    # ---------------------------------------------------------
+    # CONCATENATE 5 CLIPS
+    # ---------------------------------------------------------
+
+    concat_inputs = "".join(
+        f"[v{i}]"
+        for i in range(
+            NUMBER_OF_CLIPS
+        )
+    )
+
+    filter_parts.append(
+        (
+            f"{concat_inputs}"
+            f"concat="
+            f"n={NUMBER_OF_CLIPS}:"
+            f"v=1:"
+            f"a=0,"
+            f"trim=duration={final_duration:.4f},"
+            f"setpts=PTS-STARTPTS"
+            f"[basevideo]"
+        )
+    )
+
+    # ---------------------------------------------------------
+    # CTA ARROW
+    #
+    # Arrow appears ONLY during the CTA.
+    #
+    # Large white arrow with black outline makes it visible
+    # against different footage.
+    # ---------------------------------------------------------
+
+    arrow_filter = (
+        "[basevideo]"
+        "drawtext="
+        "fontfile=/usr/share/fonts/truetype/"
+        "dejavu/DejaVuSans-Bold.ttf:"
+        "text='↓':"
+        "fontcolor=white:"
+        "bordercolor=black:"
+        "borderw=12:"
+        "fontsize=300:"
+        "x=(w-text_w)/2:"
+        "y=3000:"
+        f"enable='between(t,{cta_start:.3f},{cta_end:.3f})'"
+        "[finalvideo]"
+    )
+
+    filter_parts.append(
+        arrow_filter
+    )
+
+    filter_complex = ";".join(
+        filter_parts
+    )
+
+    # ---------------------------------------------------------
     # OUTPUT
-    # --------------------------------
+    # ---------------------------------------------------------
 
     output_path = os.path.join(
         OUTPUT_DIR,
         output_filename
     )
 
-    # --------------------------------
-    # FFMPEG INPUTS
-    # --------------------------------
+    # Remove old output
+    if os.path.exists(
+        output_path
+    ):
+
+        os.remove(
+            output_path
+        )
+
+    # ---------------------------------------------------------
+    # FFMPEG COMMAND
+    # ---------------------------------------------------------
 
     command = [
         "ffmpeg",
-        "-y",
+        "-y"
     ]
 
+    # Add each selected clip
     for clip in selected_clips:
 
         command.extend([
@@ -332,73 +397,11 @@ def generate_video(
             clip
         ])
 
-    # Voice input.
+    # Add voice
     command.extend([
         "-i",
         voice_path
     ])
-
-    # --------------------------------
-    # VIDEO FILTER
-    # --------------------------------
-
-    filter_parts = []
-
-    for index in range(
-        CLIPS_PER_SHORT
-    ):
-
-        filter_parts.append(
-            f"[{index}:v]"
-            f"trim=duration={clip_duration},"
-            f"setpts=PTS-STARTPTS,"
-            f"scale=1080:1920:"
-            f"force_original_aspect_ratio=increase,"
-            f"crop=1080:1920,"
-            f"setsar=1,"
-            f"format=yuv420p"
-            f"[v{index}]"
-        )
-
-    video_inputs = "".join(
-        f"[v{i}]"
-        for i in range(
-            CLIPS_PER_SHORT
-        )
-    )
-
-    filter_parts.append(
-        f"{video_inputs}"
-        f"concat=n={CLIPS_PER_SHORT}:"
-        f"v=1:a=0,"
-        f"format=yuv420p"
-        f"[basevideo]"
-    )
-
-    # --------------------------------
-    # ARROW
-    # --------------------------------
-
-    filter_parts.append(
-        "[basevideo]"
-        "drawtext="
-        "fontfile=/usr/share/fonts/truetype/dejavu/"
-        "DejaVuSans-Bold.ttf:"
-        "text='↓':"
-        "fontcolor=white:"
-        "fontsize=150:"
-        "borderw=8:"
-        "bordercolor=black:"
-        "x=(w-text_w)/2:"
-        "y=1640"
-        "[finalvideo]"
-    )
-
-    filter_complex = ";".join(
-        filter_parts
-    )
-
-    audio_index = CLIPS_PER_SHORT
 
     command.extend([
         "-filter_complex",
@@ -408,40 +411,46 @@ def generate_video(
         "[finalvideo]",
 
         "-map",
-        f"{audio_index}:a:0",
+        f"{NUMBER_OF_CLIPS}:a",
 
         "-t",
-        str(final_duration),
-
-        "-r",
-        "30",
+        f"{final_duration:.3f}",
 
         "-c:v",
         "libx264",
 
         "-preset",
-        "veryfast",
+        "medium",
 
         "-crf",
-        "23",
+        "19",
+
+        "-profile:v",
+        "high",
+
+        "-level",
+        "5.2",
+
+        "-pix_fmt",
+        "yuv420p",
 
         "-c:a",
         "aac",
 
         "-b:a",
-        "128k",
+        "192k",
 
-        "-shortest",
+        "-ar",
+        "44100",
+
+        "-movflags",
+        "+faststart",
 
         output_path
     ])
 
-    # --------------------------------
-    # RENDER
-    # --------------------------------
-
     print(
-        "\nRendering 5-CLIP Short...",
+        "\nRendering 5-CLIP 4K Short...",
         flush=True
     )
 
@@ -454,42 +463,48 @@ def generate_video(
     if result.returncode != 0:
 
         print(
-            "FFmpeg rendering failed.",
+            "\n===== FFMPEG ERROR =====",
             flush=True
         )
 
         print(
-            result.stderr,
+            result.stderr[-10000:],
             flush=True
         )
 
         raise RuntimeError(
-            "FFmpeg failed."
+            "FFmpeg video rendering failed."
         )
 
-    # --------------------------------
-    # VALIDATE OUTPUT
-    # --------------------------------
+    # ---------------------------------------------------------
+    # VERIFY OUTPUT
+    # ---------------------------------------------------------
 
     if not os.path.exists(
         output_path
     ):
 
         raise RuntimeError(
-            "Output video was not created."
+            "Final video was not created."
         )
 
-    output_size = os.path.getsize(
-        output_path
+    final_file_duration = (
+        get_media_duration(
+            output_path
+        )
     )
 
-    final_file_duration = get_duration(
-        output_path
+    file_size_mb = (
+        os.path.getsize(
+            output_path
+        )
+        /
+        (1024 * 1024)
     )
 
     print(
-        f"Final video size: "
-        f"{output_size / 1024 / 1024:.2f} MB",
+        f"\nFinal video size: "
+        f"{file_size_mb:.2f} MB",
         flush=True
     )
 
@@ -499,14 +514,14 @@ def generate_video(
         flush=True
     )
 
-    if output_size < 10000:
-
-        raise RuntimeError(
-            "Generated video appears empty."
-        )
+    print(
+        f"Final resolution: "
+        f"{TARGET_WIDTH}x{TARGET_HEIGHT}",
+        flush=True
+    )
 
     print(
-        "\n===== 5-CLIP VIDEO TEST: SUCCESS =====",
+        "\n===== 5-CLIP 4K VIDEO SUCCESS =====",
         flush=True
     )
 
