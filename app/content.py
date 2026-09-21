@@ -11,33 +11,44 @@ MODEL_NAME = "gemini-3.5-flash"
 SYSTEM_PROMPT = """
 You are a professional YouTube Shorts scriptwriter.
 
-Write a COMPLETE spoken script for an educational YouTube Short about
-an AI trading bot.
+Create ONE original spoken script for a YouTube Short about an AI
+trading bot.
 
-The Short is designed to send interested viewers to ONE longer tutorial
-through YouTube's Related Video feature.
+The Short has TWO clearly separated parts.
 
-The longer tutorial explains how to use the AI trading bot for trading.
+PART 1 — TRADING BOT
+The first half should explain one useful concept about the AI
+trading bot.
 
-STRICT LENGTH:
-The final script MUST contain 55 to 80 words.
-Target approximately 65 words.
+PART 2 — CTA
+The second half should naturally tell interested viewers to open
+the Related Video and watch the complete setup tutorial.
 
-Write ONE natural paragraph.
+The CTA must communicate this idea:
 
-The script must contain:
+"Tap the Related Video below the title to watch the complete setup
+tutorial."
 
-1. A strong hook.
-2. A useful explanation of ONE concept.
-3. A practical takeaway.
-4. A natural transition toward the related tutorial.
+Naturally change the wording every time.
 
-The final sentence should encourage interested viewers to open the
-related tutorial.
+LENGTH:
 
-Use natural spoken English.
+42–48 words total.
 
-Vary the hook and CTA between scripts.
+The first part should be approximately 20–24 words.
+The CTA should be approximately 20–24 words.
+
+The complete script should normally produce approximately
+15–20 seconds of natural narration.
+
+Every script must be substantially different.
+
+Vary:
+- hook
+- trading concept
+- explanation
+- sentence structure
+- CTA wording
 
 Never:
 - promise profits
@@ -50,28 +61,39 @@ Never:
 - fabricate screenshots
 - fabricate testimonials
 - use fake urgency
-- use misleading clickbait
-- make financial guarantees
+- use misleading claims
 
-Do not write a title.
-Do not write hashtags.
-Do not write bullet points.
-Do not write labels.
-Do not write scene directions.
-Do not write timestamps.
-Do not put the script inside quotation marks.
+Do not write:
+- titles
+- hashtags
+- bullet points
+- scene directions
+- timestamps
 
-Return ONLY the complete spoken script.
+Return ONLY the script in this exact format:
+
+BOT:
+[bot explanation]
+
+CTA:
+[CTA]
+
+The BOT and CTA sections must both contain spoken sentences.
 """
 
 
-def generate_script(topic: str, previous_topics=None) -> str:
+def generate_script(
+    topic: str,
+    previous_topics=None
+):
 
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv(
+        "GEMINI_API_KEY"
+    )
 
     if not api_key:
         raise RuntimeError(
-            "GEMINI_API_KEY is not configured in Railway."
+            "GEMINI_API_KEY is not configured."
         )
 
     client = genai.Client(
@@ -94,19 +116,26 @@ TOPIC:
 PREVIOUSLY USED TOPICS:
 {previous}
 
-Now write the complete Short.
+Create a completely new script.
 
-IMPORTANT:
-Do not give me an outline.
-Do not give me a summary.
-Do not give me instructions about writing.
+Do not repeat previous wording.
 
-I need the FINAL spoken script itself.
+Remember:
 
-The final answer must be between 55 and 80 words.
-Target approximately 65 words.
+42–48 words total.
+BOT = approximately first half.
+CTA = approximately second half.
 
-Write the complete script now.
+The CTA must tell viewers to tap the Related Video below the
+title to watch the complete setup tutorial.
+
+Return ONLY:
+
+BOT:
+...
+
+CTA:
+...
 """
 
     last_error = None
@@ -124,7 +153,7 @@ Write the complete script now.
                 model=MODEL_NAME,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    max_output_tokens=1000,
+                    max_output_tokens=500,
                     thinking_config=types.ThinkingConfig(
                         thinking_level="minimal"
                     ),
@@ -132,60 +161,82 @@ Write the complete script now.
             )
 
             if not response.text:
-
                 raise RuntimeError(
                     "Gemini returned an empty response."
                 )
 
-            script = response.text.strip()
+            raw = response.text.strip()
+
+            print(
+                f"Gemini response: {raw}",
+                flush=True
+            )
+
+            if "BOT:" not in raw:
+                raise RuntimeError(
+                    "Gemini did not return BOT section."
+                )
+
+            if "CTA:" not in raw:
+                raise RuntimeError(
+                    "Gemini did not return CTA section."
+                )
+
+            bot_text = raw.split(
+                "BOT:",
+                1
+            )[1].split(
+                "CTA:",
+                1
+            )[0].strip()
+
+            cta_text = raw.split(
+                "CTA:",
+                1
+            )[1].strip()
+
+            full_script = (
+                f"{bot_text} {cta_text}"
+            )
 
             word_count = len(
-                script.split()
+                full_script.split()
             )
 
             print(
-                f"Gemini generated {word_count} words.",
+                f"Generated {word_count} words.",
                 flush=True
             )
 
-            print(
-                f"Gemini script: {script}",
-                flush=True
-            )
-
-            if word_count < 55:
-
+            if word_count < 42:
                 raise RuntimeError(
-                    f"Gemini returned only {word_count} words. "
-                    "Expected 55-80 words."
+                    f"Script too short: {word_count} words."
                 )
 
-            if word_count > 80:
-
+            if word_count > 48:
                 raise RuntimeError(
-                    f"Gemini returned {word_count} words. "
-                    "Expected 55-80 words."
+                    f"Script too long: {word_count} words."
                 )
 
-            return script
+            return {
+                "bot": bot_text,
+                "cta": cta_text,
+                "full": full_script
+            }
 
         except Exception as e:
 
             last_error = e
 
             print(
-                f"Gemini attempt {attempt + 1}/3 failed: {e}",
+                f"Gemini attempt "
+                f"{attempt + 1}/3 failed: {e}",
                 flush=True
             )
 
             if attempt < 2:
 
                 delay = 5 * (2 ** attempt)
-
-                print(
-                    f"Retrying Gemini in {delay} seconds...",
-                    flush=True
-                )
 
                 time.sleep(delay)
 
