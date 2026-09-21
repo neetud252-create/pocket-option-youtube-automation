@@ -1,11 +1,11 @@
 import os
-from openai import OpenAI
+from google import genai
 
 
 SYSTEM_PROMPT = """
 You create short-form YouTube content for an AI trading-bot channel.
 
-Create educational/demo-oriented YouTube Shorts.
+Create educational and demonstration-oriented YouTube Shorts.
 
 Rules:
 - 20-35 seconds
@@ -21,20 +21,19 @@ Rules:
 """
 
 
-def generate_script(topic: str, previous_topics: list[str] | None = None) -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
+def generate_script(topic: str, previous_topics=None) -> str:
+    api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured.")
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-    client = OpenAI(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
     previous = ", ".join(previous_topics or []) or "None"
 
-    response = client.responses.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
-        instructions=SYSTEM_PROMPT,
-        input=f"""
+    prompt = f"""
+{SYSTEM_PROMPT}
+
 Create one YouTube Short script.
 
 Topic:
@@ -43,8 +42,15 @@ Topic:
 Previously used topics:
 {previous}
 
-Return only the spoken script.
-""",
+Return ONLY the spoken script.
+"""
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
     )
 
-    return response.output_text.strip()
+    if not response.text:
+        raise RuntimeError("Gemini returned an empty response.")
+
+    return response.text.strip()
