@@ -5,76 +5,47 @@ from google import genai
 from google.genai import types
 
 
-# Gemini model recommended by the error returned from your API
 MODEL_NAME = "gemini-3.5-flash"
 
 
 SYSTEM_PROMPT = """
-You create short-form YouTube content for an AI trading-bot channel.
+You are an expert YouTube Shorts scriptwriter.
 
-The main purpose of every Short is to attract genuinely interested viewers
-and send them to ONE longer YouTube tutorial on the same channel.
+Create short educational YouTube Shorts for an AI trading-bot channel.
+
+The purpose of each Short is to attract interested viewers and send them
+to one longer YouTube tutorial through the YouTube Related Video feature.
 
 The longer tutorial explains how to use the AI trading bot for trading.
-The Short should create curiosity about the tutorial without making false
-claims or promising financial results.
 
-CONTENT RULES:
+IMPORTANT WRITING RULES:
 
-- Write approximately 55-80 spoken words.
-- Target around 20-35 seconds when spoken naturally.
-- Start with a strong hook in the first sentence.
-- Focus on ONE clear topic.
-- Explain something useful about AI-assisted trading, chart analysis,
-  indicators, trading psychology, automation, or how the bot works.
-- Make the Short valuable by itself.
-- Create curiosity about the complete bot setup and workflow.
-- Do not explain the entire tutorial inside the Short.
-- Give viewers a natural reason to watch the related tutorial.
-- Use simple, natural spoken English.
-- Sound like a human creator, not a robotic advertisement.
-- Vary sentence structure, hooks, explanations, and CTA wording.
+- The script MUST contain 55 to 80 words.
+- Write approximately 65 words.
+- Never write fewer than 55 words.
+- Use natural spoken English.
+- The script should sound like a real human creator.
+- Start with a strong hook.
+- Explain ONE useful concept.
+- Give the viewer a useful takeaway.
+- Create curiosity about the complete bot setup.
+- End with a natural CTA toward the related tutorial.
+- Do not explain the entire tutorial in the Short.
+- Do not use the word "subscribe" as the main CTA.
+- Vary hooks and CTA wording between scripts.
 
 TRADING SAFETY:
 
 - Never promise profits.
 - Never guarantee winning trades.
+- Never claim guaranteed signals.
 - Never claim the bot cannot lose.
-- Never claim a specific win rate unless verified information is provided.
-- Never invent trading results.
-- Never fabricate screenshots, statistics, earnings, testimonials,
-  or performance data.
+- Never invent win rates.
+- Never invent profits or results.
+- Never fabricate screenshots or statistics.
 - Never imply viewers will definitely make money.
 - Do not use fake urgency.
 - Do not use misleading clickbait.
-
-CTA:
-
-The final sentence should naturally direct interested viewers toward
-the related long-form tutorial.
-
-The CTA should NOT make "subscribe" the main action.
-
-Use varied CTA styles such as:
-
-- "I've explained the complete setup in the related video."
-- "Want to see the full process? Check the related tutorial."
-- "The complete bot setup is explained in the related video."
-- "If you want to see how this works step by step, open the related video."
-- "I've covered the full setup in the tutorial linked to this Short."
-
-Do not repeat the same CTA every time.
-
-FUNNEL:
-
-SHORT
-→ viewer becomes interested
-→ viewer opens the YouTube Related Video
-→ viewer watches the longer tutorial
-→ tutorial explains how to use the bot
-
-The Short must NOT falsely claim that the tutorial guarantees profits
-or successful trades.
 
 Return ONLY the spoken script.
 """
@@ -100,53 +71,51 @@ def generate_script(topic: str, previous_topics=None) -> str:
     prompt = f"""
 {SYSTEM_PROMPT}
 
-Create ONE YouTube Short script.
+Create ONE YouTube Short script about:
 
-TOPIC:
 {topic}
 
-PREVIOUSLY USED TOPICS:
+Previously used topics:
 {previous}
 
-STRUCTURE:
+The script MUST follow this exact structure:
 
-1. HOOK
-Immediately give the viewer a reason to keep watching.
+HOOK:
+Start with an interesting question, surprising observation,
+or strong statement.
 
-2. EXPLANATION
-Explain one useful and interesting concept related to the topic.
+EXPLANATION:
+Explain one useful concept about AI trading bots,
+chart analysis, indicators, automation, or trading.
 
-3. CURIOSITY
-Create natural curiosity about how the complete bot setup or workflow
-works.
+TAKEAWAY:
+Give the viewer one useful thing they can understand or remember.
 
-4. CTA
-Direct interested viewers to the related long-form tutorial.
+CTA:
+Direct interested viewers to the related long-form tutorial,
+where the complete bot setup and usage is explained.
 
-The related tutorial explains how to use the AI trading bot for trading.
+WORD COUNT REQUIREMENT:
 
-The CTA should feel like a natural continuation of the Short,
-not an advertisement.
+Write between 55 and 80 words.
+
+TARGET: approximately 65 words.
 
 IMPORTANT:
+Do NOT stop after one sentence.
+Do NOT summarize the topic in one sentence.
+Complete all four parts naturally in one spoken paragraph.
 
-- Do not repeat previous topics.
-- Do not use the same opening sentence repeatedly.
-- Do not use the same CTA wording repeatedly.
-- Do not mention "this video will make you money".
-- Do not mention guaranteed profits.
-- Do not invent numbers or results.
-- Do not include a title.
-- Do not include hashtags.
-- Do not include scene directions.
-- Do not include timestamps.
-- Do not include quotation marks around the script.
-- Do not include labels such as Hook, Explanation, or CTA.
-- Do not use bullet points.
+Do not include:
+- title
+- hashtags
+- labels
+- bullet points
+- timestamps
+- scene directions
+- quotation marks
 
-Write approximately 55-80 words.
-
-Return ONLY the spoken script.
+Return ONLY the complete spoken script.
 """
 
     last_error = None
@@ -164,7 +133,8 @@ Return ONLY the spoken script.
                 model=MODEL_NAME,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    max_output_tokens=300
+                    max_output_tokens=500,
+                    temperature=0.8,
                 ),
             )
 
@@ -189,16 +159,16 @@ Return ONLY the spoken script.
                 flush=True
             )
 
-            if word_count < 35:
+            if word_count < 55:
                 raise RuntimeError(
                     f"Gemini returned only {word_count} words. "
-                    "Expected at least 35 words."
+                    "Expected 55-80 words."
                 )
 
-            if word_count > 100:
+            if word_count > 80:
                 raise RuntimeError(
                     f"Gemini returned {word_count} words. "
-                    "Expected approximately 55-80 words."
+                    "Expected 55-80 words."
                 )
 
             return script
