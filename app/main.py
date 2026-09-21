@@ -1,9 +1,12 @@
 import os
 import time
+import random
 import threading
+
 from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
+from app.content import generate_script
 from app.voice import generate_voice
 from app.video import generate_video
 
@@ -23,7 +26,12 @@ class VideoHandler(SimpleHTTPRequestHandler):
 
 def start_video_server():
 
-    port = int(os.getenv("PORT", "8080"))
+    port = int(
+        os.getenv(
+            "PORT",
+            "8080"
+        )
+    )
 
     server = ThreadingHTTPServer(
         ("0.0.0.0", port),
@@ -41,11 +49,22 @@ def start_video_server():
 def main():
 
     print("=" * 60, flush=True)
+
     print(
-        "10-CLIP MIX TEST",
+        "AI TRADING SHORTS AUTOMATION",
         flush=True
     )
+
     print("=" * 60, flush=True)
+
+    os.makedirs(
+        OUTPUT_DIR,
+        exist_ok=True
+    )
+
+    # ---------------------------------------------------------
+    # START VIDEO SERVER
+    # ---------------------------------------------------------
 
     server_thread = threading.Thread(
         target=start_video_server,
@@ -54,83 +73,167 @@ def main():
 
     server_thread.start()
 
-    # TEMPORARY TEST SCRIPT
-    # Gemini is intentionally bypassed because
-    # the current free-tier quota is exhausted.
+    # ---------------------------------------------------------
+    # TOPIC ROTATION
+    # ---------------------------------------------------------
 
-    script = (
-        "Ever wondered how an AI trading bot reads a chart? "
-        "Instead of watching every price movement manually, "
-        "the system can analyze chart patterns, support and "
-        "resistance levels, and other market information. "
-        "Understanding how these elements work together can "
-        "help you better understand what the bot is analyzing. "
-        "Watch the related tutorial to see how the complete "
-        "setup works."
+    topics = [
+
+        "how an AI trading bot analyzes candlestick patterns",
+
+        "how an AI trading bot studies price movement",
+
+        "how an AI trading bot analyzes support and resistance",
+
+        "how an AI trading bot identifies chart patterns",
+
+        "how an AI trading bot analyzes indicators",
+
+        "how an AI trading bot studies market structure",
+
+        "how an AI trading bot processes trading information",
+
+        "how an AI trading bot analyzes possible trade setups",
+
+        "how an AI trading bot reads changing market conditions",
+
+        "how an AI trading bot combines different chart signals",
+
+    ]
+
+    topic = random.choice(
+        topics
+    )
+
+    print(
+        f"\nSelected topic:\n{topic}",
+        flush=True
     )
 
     try:
 
+        # -----------------------------------------------------
+        # 1. GENERATE NEW SCRIPT
+        # -----------------------------------------------------
+
         print(
-            "\n===== TEST SCRIPT =====",
+            "\n[1/3] Generating new script...",
+            flush=True
+        )
+
+        script_data = generate_script(
+            topic
+        )
+
+        bot_text = script_data["bot"]
+
+        cta_text = script_data["cta"]
+
+        full_script = script_data["full"]
+
+        print(
+            "\n===== BOT PART =====",
             flush=True
         )
 
         print(
-            script,
+            bot_text,
             flush=True
         )
 
         print(
-            "======================",
+            "\n===== CTA PART =====",
             flush=True
         )
 
         print(
-            "\n[1/2] Generating Piper voice...",
+            cta_text,
+            flush=True
+        )
+
+        print(
+            "\n===== FULL SCRIPT =====",
+            flush=True
+        )
+
+        print(
+            full_script,
+            flush=True
+        )
+
+        # -----------------------------------------------------
+        # 2. GENERATE ENHANCED PIPER VOICE
+        # -----------------------------------------------------
+
+        print(
+            "\n[2/3] Generating enhanced voice...",
             flush=True
         )
 
         voice_path = generate_voice(
-            script,
-            "test_voice.wav"
+            full_script,
+            "short_voice.wav"
         )
 
         print(
-            f"Voice created: {voice_path}",
+            f"Voice created:\n{voice_path}",
             flush=True
         )
 
+        # -----------------------------------------------------
+        # 3. GENERATE VIDEO
+        # -----------------------------------------------------
+
         print(
-            "\n[2/2] Generating 10-CLIP Short...",
+            "\n[3/3] Generating 5-clip Short...",
             flush=True
         )
 
         video_path = generate_video(
-            script,
+            full_script,
             voice_path,
-            "test_short.mp4"
+            "short.mp4"
         )
 
         print(
-            "\n===== 10-CLIP TEST SUCCESS =====",
+            "\n" + "=" * 60,
             flush=True
         )
 
         print(
-            f"Final video: {video_path}",
+            "SHORT GENERATION SUCCESS",
             flush=True
         )
 
         print(
-            "Open /test_short.mp4 on the Railway domain.",
+            "=" * 60,
+            flush=True
+        )
+
+        print(
+            f"Video: {video_path}",
+            flush=True
+        )
+
+        print(
+            "Open /short.mp4 on the Railway domain.",
             flush=True
         )
 
     except Exception as e:
 
         print(
-            "\n===== 10-CLIP TEST FAILED =====",
+            "\n" + "=" * 60,
+            flush=True
+        )
+
+        print(
+            "SHORT GENERATION FAILED",
+            flush=True
+        )
+
+        print(
+            "=" * 60,
             flush=True
         )
 
@@ -138,6 +241,10 @@ def main():
             f"Error: {e}",
             flush=True
         )
+
+    # ---------------------------------------------------------
+    # KEEP RAILWAY SERVICE ALIVE
+    # ---------------------------------------------------------
 
     while True:
 
