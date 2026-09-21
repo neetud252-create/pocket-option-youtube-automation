@@ -1,4 +1,5 @@
 import os
+import time
 from google import genai
 
 
@@ -45,12 +46,31 @@ Previously used topics:
 Return ONLY the spoken script.
 """
 
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt,
+    last_error = None
+
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+
+            if not response.text:
+                raise RuntimeError("Gemini returned an empty response.")
+
+            return response.text.strip()
+
+        except Exception as e:
+            last_error = e
+
+            print(
+                f"Gemini attempt {attempt + 1}/3 failed: {e}",
+                flush=True
+            )
+
+            if attempt < 2:
+                time.sleep(10)
+
+    raise RuntimeError(
+        f"Gemini failed after 3 attempts: {last_error}"
     )
-
-    if not response.text:
-        raise RuntimeError("Gemini returned an empty response.")
-
-    return response.text.strip()
