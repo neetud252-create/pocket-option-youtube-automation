@@ -5,7 +5,8 @@ from google import genai
 from google.genai import types
 
 
-MODEL_NAME = "gemini-2.5-flash-lite"
+# Gemini model recommended by the error returned from your API
+MODEL_NAME = "gemini-3.5-flash"
 
 
 SYSTEM_PROMPT = """
@@ -26,10 +27,10 @@ CONTENT RULES:
 - Focus on ONE clear topic.
 - Explain something useful about AI-assisted trading, chart analysis,
   indicators, trading psychology, automation, or how the bot works.
-- Make the Short valuable on its own.
+- Make the Short valuable by itself.
 - Create curiosity about the complete bot setup and workflow.
 - Do not explain the entire tutorial inside the Short.
-- The viewer should naturally have a reason to watch the related tutorial.
+- Give viewers a natural reason to watch the related tutorial.
 - Use simple, natural spoken English.
 - Sound like a human creator, not a robotic advertisement.
 - Vary sentence structure, hooks, explanations, and CTA wording.
@@ -39,8 +40,7 @@ TRADING SAFETY:
 - Never promise profits.
 - Never guarantee winning trades.
 - Never claim the bot cannot lose.
-- Never claim a specific win rate unless that exact verified information
-  is provided by the user.
+- Never claim a specific win rate unless verified information is provided.
 - Never invent trading results.
 - Never fabricate screenshots, statistics, earnings, testimonials,
   or performance data.
@@ -53,7 +53,7 @@ CTA:
 The final sentence should naturally direct interested viewers toward
 the related long-form tutorial.
 
-The CTA should NOT say "subscribe" as the main CTA.
+The CTA should NOT make "subscribe" the main action.
 
 Use varied CTA styles such as:
 
@@ -65,9 +65,7 @@ Use varied CTA styles such as:
 
 Do not repeat the same CTA every time.
 
-IMPORTANT:
-
-The Short is part of a traffic funnel:
+FUNNEL:
 
 SHORT
 → viewer becomes interested
@@ -75,8 +73,8 @@ SHORT
 → viewer watches the longer tutorial
 → tutorial explains how to use the bot
 
-The Short must NOT falsely claim that clicking the tutorial will
-guarantee profits or successful trades.
+The Short must NOT falsely claim that the tutorial guarantees profits
+or successful trades.
 
 Return ONLY the spoken script.
 """
@@ -120,7 +118,7 @@ Explain one useful and interesting concept related to the topic.
 
 3. CURIOSITY
 Create natural curiosity about how the complete bot setup or workflow
-works without pretending there is secret or guaranteed information.
+works.
 
 4. CTA
 Direct interested viewers to the related long-form tutorial.
@@ -192,14 +190,12 @@ Return ONLY the spoken script.
             )
 
             if word_count < 35:
-
                 raise RuntimeError(
                     f"Gemini returned only {word_count} words. "
                     "Expected at least 35 words."
                 )
 
             if word_count > 100:
-
                 raise RuntimeError(
                     f"Gemini returned {word_count} words. "
                     "Expected approximately 55-80 words."
