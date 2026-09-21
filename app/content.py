@@ -5,6 +5,9 @@ from google import genai
 from google.genai import types
 
 
+MODEL_NAME = "gemini-2.5-flash-lite"
+
+
 SYSTEM_PROMPT = """
 You create short-form YouTube content for an AI trading-bot channel.
 
@@ -53,6 +56,7 @@ the related long-form tutorial.
 The CTA should NOT say "subscribe" as the main CTA.
 
 Use varied CTA styles such as:
+
 - "I've explained the complete setup in the related video."
 - "Want to see the full process? Check the related tutorial."
 - "The complete bot setup is explained in the related video."
@@ -87,9 +91,13 @@ def generate_script(topic: str, previous_topics=None) -> str:
             "GEMINI_API_KEY is not configured in Railway."
         )
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(
+        api_key=api_key
+    )
 
-    previous = ", ".join(previous_topics or []) or "None"
+    previous = ", ".join(
+        previous_topics or []
+    ) or "None"
 
     prompt = f"""
 {SYSTEM_PROMPT}
@@ -123,7 +131,8 @@ The CTA should feel like a natural continuation of the Short,
 not an advertisement.
 
 IMPORTANT:
-- Do not repeat the previous topics.
+
+- Do not repeat previous topics.
 - Do not use the same opening sentence repeatedly.
 - Do not use the same CTA wording repeatedly.
 - Do not mention "this video will make you money".
@@ -148,14 +157,16 @@ Return ONLY the spoken script.
 
         try:
 
+            print(
+                f"Calling Gemini model: {MODEL_NAME}",
+                flush=True
+            )
+
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model=MODEL_NAME,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    max_output_tokens=500,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level="low"
-                    ),
+                    max_output_tokens=300
                 ),
             )
 
@@ -166,25 +177,29 @@ Return ONLY the spoken script.
 
             script = response.text.strip()
 
-            word_count = len(script.split())
+            word_count = len(
+                script.split()
+            )
 
             print(
                 f"Gemini generated {word_count} words.",
-                flush=True,
+                flush=True
             )
 
             print(
                 f"Gemini script: {script}",
-                flush=True,
+                flush=True
             )
 
             if word_count < 35:
+
                 raise RuntimeError(
                     f"Gemini returned only {word_count} words. "
                     "Expected at least 35 words."
                 )
 
             if word_count > 100:
+
                 raise RuntimeError(
                     f"Gemini returned {word_count} words. "
                     "Expected approximately 55-80 words."
@@ -198,7 +213,7 @@ Return ONLY the spoken script.
 
             print(
                 f"Gemini attempt {attempt + 1}/3 failed: {e}",
-                flush=True,
+                flush=True
             )
 
             if attempt < 2:
@@ -207,7 +222,7 @@ Return ONLY the spoken script.
 
                 print(
                     f"Retrying Gemini in {delay} seconds...",
-                    flush=True,
+                    flush=True
                 )
 
                 time.sleep(delay)
