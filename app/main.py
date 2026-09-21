@@ -1,12 +1,10 @@
 import os
 import time
-import random
 import threading
 
 from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
-from app.content import generate_script
 from app.voice import generate_voice
 from app.video import generate_video
 
@@ -51,7 +49,7 @@ def main():
     print("=" * 60, flush=True)
 
     print(
-        "AI TRADING SHORTS AUTOMATION",
+        "AI TRADING SHORTS - VIDEO TEST",
         flush=True
     )
 
@@ -62,10 +60,6 @@ def main():
         exist_ok=True
     )
 
-    # ---------------------------------------------------------
-    # START VIDEO SERVER
-    # ---------------------------------------------------------
-
     server_thread = threading.Thread(
         target=start_video_server,
         daemon=True
@@ -74,125 +68,85 @@ def main():
     server_thread.start()
 
     # ---------------------------------------------------------
-    # TOPIC ROTATION
+    # TEMPORARY TEST SCRIPT
+    # Gemini is bypassed because its current free quota
+    # is exhausted.
     # ---------------------------------------------------------
 
-    topics = [
+    bot_text = (
+        "An AI trading bot can study candlestick patterns "
+        "and price movement to organize the information "
+        "you see on a trading chart."
+    )
 
-        "how an AI trading bot analyzes candlestick patterns",
+    cta_text = (
+        "Want to see how the complete setup works? "
+        "Tap the Related Video below the title "
+        "to watch the full tutorial."
+    )
 
-        "how an AI trading bot studies price movement",
-
-        "how an AI trading bot analyzes support and resistance",
-
-        "how an AI trading bot identifies chart patterns",
-
-        "how an AI trading bot analyzes indicators",
-
-        "how an AI trading bot studies market structure",
-
-        "how an AI trading bot processes trading information",
-
-        "how an AI trading bot analyzes possible trade setups",
-
-        "how an AI trading bot reads changing market conditions",
-
-        "how an AI trading bot combines different chart signals",
-
-    ]
-
-    topic = random.choice(
-        topics
+    full_script = (
+        bot_text
+        + " "
+        + cta_text
     )
 
     print(
-        f"\nSelected topic:\n{topic}",
+        "\n===== BOT PART =====",
+        flush=True
+    )
+
+    print(
+        bot_text,
+        flush=True
+    )
+
+    print(
+        "\n===== CTA PART =====",
+        flush=True
+    )
+
+    print(
+        cta_text,
+        flush=True
+    )
+
+    print(
+        "\n===== FULL SCRIPT =====",
+        flush=True
+    )
+
+    print(
+        full_script,
         flush=True
     )
 
     try:
 
-        # -----------------------------------------------------
-        # 1. GENERATE NEW SCRIPT
-        # -----------------------------------------------------
-
         print(
-            "\n[1/3] Generating new script...",
-            flush=True
-        )
-
-        script_data = generate_script(
-            topic
-        )
-
-        bot_text = script_data["bot"]
-
-        cta_text = script_data["cta"]
-
-        full_script = script_data["full"]
-
-        print(
-            "\n===== BOT PART =====",
-            flush=True
-        )
-
-        print(
-            bot_text,
-            flush=True
-        )
-
-        print(
-            "\n===== CTA PART =====",
-            flush=True
-        )
-
-        print(
-            cta_text,
-            flush=True
-        )
-
-        print(
-            "\n===== FULL SCRIPT =====",
-            flush=True
-        )
-
-        print(
-            full_script,
-            flush=True
-        )
-
-        # -----------------------------------------------------
-        # 2. GENERATE ENHANCED PIPER VOICE
-        # -----------------------------------------------------
-
-        print(
-            "\n[2/3] Generating enhanced voice...",
+            "\n[1/2] Generating enhanced Piper voice...",
             flush=True
         )
 
         voice_path = generate_voice(
             full_script,
-            "short_voice.wav"
+            "test_voice.wav"
         )
 
         print(
-            f"Voice created:\n{voice_path}",
+            f"Voice created: {voice_path}",
             flush=True
         )
 
-        # -----------------------------------------------------
-        # 3. GENERATE VIDEO
-        # -----------------------------------------------------
-
         print(
-            "\n[3/3] Generating 5-clip Short...",
+            "\n[2/2] Generating 4K 5-clip Short...",
             flush=True
         )
 
         video_path = generate_video(
             full_script,
             voice_path,
-            "short.mp4"
+            "test_short_4k.mp4"
         )
 
         print(
@@ -201,7 +155,7 @@ def main():
         )
 
         print(
-            "SHORT GENERATION SUCCESS",
+            "4K VIDEO TEST SUCCESS",
             flush=True
         )
 
@@ -211,12 +165,12 @@ def main():
         )
 
         print(
-            f"Video: {video_path}",
+            f"Final video: {video_path}",
             flush=True
         )
 
         print(
-            "Open /short.mp4 on the Railway domain.",
+            "Open /test_short_4k.mp4 on the Railway domain.",
             flush=True
         )
 
@@ -228,7 +182,7 @@ def main():
         )
 
         print(
-            "SHORT GENERATION FAILED",
+            "VIDEO TEST FAILED",
             flush=True
         )
 
@@ -241,10 +195,6 @@ def main():
             f"Error: {e}",
             flush=True
         )
-
-    # ---------------------------------------------------------
-    # KEEP RAILWAY SERVICE ALIVE
-    # ---------------------------------------------------------
 
     while True:
 
