@@ -21,7 +21,6 @@ OUTPUT_DIR = os.path.join(
     "output"
 )
 
-
 TARGET_WIDTH = 2160
 TARGET_HEIGHT = 3840
 
@@ -31,9 +30,7 @@ MIN_DURATION = 15.0
 MAX_DURATION = 20.0
 
 
-def get_media_duration(
-    file_path: str
-) -> float:
+def get_media_duration(file_path: str) -> float:
 
     command = [
         "ffprobe",
@@ -54,7 +51,7 @@ def get_media_duration(
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"Could not read duration: {file_path}"
+            f"Could not read media duration: {file_path}"
         )
 
     data = json.loads(
@@ -66,11 +63,10 @@ def get_media_duration(
     )
 
 
-def validate_video(
-    file_path: str
-):
+def validate_video(file_path: str):
 
     if not os.path.exists(file_path):
+
         raise FileNotFoundError(
             f"Video not found: {file_path}"
         )
@@ -80,26 +76,19 @@ def validate_video(
     )
 
     if duration <= 0:
+
         raise RuntimeError(
-            f"Invalid video duration: {file_path}"
+            f"Invalid video: {file_path}"
         )
 
     print(
-        f"Validated: {os.path.basename(file_path)} "
+        f"Validated: "
+        f"{os.path.basename(file_path)} "
         f"({duration:.2f}s)",
         flush=True
     )
 
     return duration
-
-
-def get_voice_duration(
-    voice_path: str
-) -> float:
-
-    return get_media_duration(
-        voice_path
-    )
 
 
 def generate_video(
@@ -113,14 +102,8 @@ def generate_video(
         exist_ok=True
     )
 
-    if not os.path.exists(FOOTAGE_DIR):
-        raise FileNotFoundError(
-            f"Footage directory not found: "
-            f"{FOOTAGE_DIR}"
-        )
-
     # ---------------------------------------------------------
-    # FIND ALL FOOTAGE
+    # FIND CLIPS
     # ---------------------------------------------------------
 
     all_clips = []
@@ -148,13 +131,14 @@ def generate_video(
     )
 
     if len(all_clips) < 10:
+
         raise RuntimeError(
             f"Need at least 10 clips. "
             f"Found {len(all_clips)}."
         )
 
     # ---------------------------------------------------------
-    # RANDOMLY SELECT EXACTLY 5 CLIPS
+    # SELECT EXACTLY 5 RANDOM CLIPS
     # ---------------------------------------------------------
 
     selected_clips = random.sample(
@@ -195,19 +179,15 @@ def generate_video(
     # VOICE DURATION
     # ---------------------------------------------------------
 
-    voice_duration = get_voice_duration(
+    voice_duration = get_media_duration(
         voice_path
     )
 
     print(
-        f"\nVoice duration: "
+        f"Voice duration: "
         f"{voice_duration:.2f} seconds",
         flush=True
     )
-
-    # ---------------------------------------------------------
-    # TARGET VIDEO DURATION
-    # ---------------------------------------------------------
 
     final_duration = min(
         voice_duration,
@@ -230,13 +210,9 @@ def generate_video(
 
     # ---------------------------------------------------------
     # CTA TIMING
-    #
-    # Script is approximately split 50/50.
-    # Arrow appears only during CTA.
     # ---------------------------------------------------------
 
     cta_start = final_duration * 0.50
-
     cta_end = final_duration
 
     print(
@@ -252,7 +228,7 @@ def generate_video(
     )
 
     # ---------------------------------------------------------
-    # EACH CLIP DURATION
+    # EACH CLIP
     # ---------------------------------------------------------
 
     clip_duration = (
@@ -267,7 +243,27 @@ def generate_video(
     )
 
     # ---------------------------------------------------------
-    # BUILD VIDEO FILTERS
+    # TEMPORARY 1080P CONCAT FILE
+    # ---------------------------------------------------------
+
+    temp_concat = os.path.join(
+        OUTPUT_DIR,
+        "temp_concat.mp4"
+    )
+
+    if os.path.exists(
+        temp_concat
+    ):
+
+        os.remove(
+            temp_concat
+        )
+
+    # ---------------------------------------------------------
+    # STEP 1
+    #
+    # Process all five clips at 1080x1920.
+    # This keeps Railway memory usage much lower.
     # ---------------------------------------------------------
 
     filter_parts = []
@@ -281,27 +277,15 @@ def generate_video(
                 f"[{index}:v]"
                 f"trim=duration={clip_duration:.4f},"
                 f"setpts=PTS-STARTPTS,"
-                f"scale={TARGET_WIDTH}:"
-                f"{TARGET_HEIGHT}:"
+                f"scale=1080:1920:"
                 f"force_original_aspect_ratio=increase:"
                 f"flags=lanczos,"
-                f"crop={TARGET_WIDTH}:"
-                f"{TARGET_HEIGHT},"
+                f"crop=1080:1920,"
                 f"setsar=1,"
-                f"unsharp="
-                f"5:5:0.65:"
-                f"5:5:0,"
-                f"eq="
-                f"contrast=1.02:"
-                f"saturation=1.03,"
                 f"format=yuv420p"
                 f"[v{index}]"
             )
         )
-
-    # ---------------------------------------------------------
-    # CONCATENATE 5 CLIPS
-    # ---------------------------------------------------------
 
     concat_inputs = "".join(
         f"[v{i}]"
@@ -319,58 +303,13 @@ def generate_video(
             f"a=0,"
             f"trim=duration={final_duration:.4f},"
             f"setpts=PTS-STARTPTS"
-            f"[basevideo]"
+            f"[concatvideo]"
         )
-    )
-
-    # ---------------------------------------------------------
-    # CTA ARROW
-    # ---------------------------------------------------------
-
-    arrow_filter = (
-        "[basevideo]"
-        "drawtext="
-        "fontfile=/usr/share/fonts/truetype/"
-        "dejavu/DejaVuSans-Bold.ttf:"
-        "text='↓':"
-        "fontcolor=white:"
-        "bordercolor=black:"
-        "borderw=12:"
-        "fontsize=300:"
-        "x=(w-text_w)/2:"
-        "y=3000:"
-        f"enable='between(t,{cta_start:.3f},{cta_end:.3f})'"
-        "[finalvideo]"
-    )
-
-    filter_parts.append(
-        arrow_filter
     )
 
     filter_complex = ";".join(
         filter_parts
     )
-
-    # ---------------------------------------------------------
-    # OUTPUT
-    # ---------------------------------------------------------
-
-    output_path = os.path.join(
-        OUTPUT_DIR,
-        output_filename
-    )
-
-    if os.path.exists(
-        output_path
-    ):
-
-        os.remove(
-            output_path
-        )
-
-    # ---------------------------------------------------------
-    # FFMPEG COMMAND
-    # ---------------------------------------------------------
 
     command = [
         "ffmpeg",
@@ -387,19 +326,128 @@ def generate_video(
         ])
 
     command.extend([
-        "-i",
-        voice_path
-    ])
-
-    command.extend([
         "-filter_complex",
         filter_complex,
+
+        "-map",
+        "[concatvideo]",
+
+        "-an",
+
+        "-t",
+        f"{final_duration:.3f}",
+
+        "-c:v",
+        "libx264",
+
+        "-preset",
+        "veryfast",
+
+        "-crf",
+        "20",
+
+        "-pix_fmt",
+        "yuv420p",
+
+        "-movflags",
+        "+faststart",
+
+        temp_concat
+    ])
+
+    print(
+        "\nStep 1/2: Creating 1080p clip sequence...",
+        flush=True
+    )
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+
+        print(
+            "\n===== STEP 1 FFMPEG ERROR =====",
+            flush=True
+        )
+
+        print(
+            result.stderr[-12000:],
+            flush=True
+        )
+
+        raise RuntimeError(
+            "1080p clip sequence rendering failed."
+        )
+
+    if not os.path.exists(
+        temp_concat
+    ):
+
+        raise RuntimeError(
+            "Temporary clip sequence was not created."
+        )
+
+    # ---------------------------------------------------------
+    # STEP 2
+    #
+    # Upscale the completed 1080p sequence to 2160x3840.
+    # Add sharpening and CTA arrow only here.
+    # ---------------------------------------------------------
+
+    output_path = os.path.join(
+        OUTPUT_DIR,
+        output_filename
+    )
+
+    if os.path.exists(
+        output_path
+    ):
+
+        os.remove(
+            output_path
+        )
+
+    final_filter = (
+        "[0:v]"
+        "scale=2160:3840:"
+        "flags=lanczos,"
+        "unsharp=5:5:0.55:5:5:0,"
+        "eq=contrast=1.02:saturation=1.03,"
+        "drawtext="
+        "fontfile=/usr/share/fonts/truetype/"
+        "dejavu/DejaVuSans-Bold.ttf:"
+        "text='↓':"
+        "fontcolor=white:"
+        "bordercolor=black:"
+        "borderw=12:"
+        "fontsize=300:"
+        "x=(w-text_w)/2:"
+        "y=3000:"
+        f"enable='between(t,{cta_start:.3f},{cta_end:.3f})'"
+        "[finalvideo]"
+    )
+
+    command = [
+        "ffmpeg",
+        "-y",
+
+        "-i",
+        temp_concat,
+
+        "-i",
+        voice_path,
+
+        "-filter_complex",
+        final_filter,
 
         "-map",
         "[finalvideo]",
 
         "-map",
-        f"{NUMBER_OF_CLIPS}:a",
+        "1:a",
 
         "-t",
         f"{final_duration:.3f}",
@@ -435,10 +483,10 @@ def generate_video(
         "+faststart",
 
         output_path
-    ])
+    ]
 
     print(
-        "\nRendering 5-CLIP 4K Short...",
+        "\nStep 2/2: Upscaling to 4K and adding CTA arrow...",
         flush=True
     )
 
@@ -451,18 +499,22 @@ def generate_video(
     if result.returncode != 0:
 
         print(
-            "\n===== FFMPEG ERROR =====",
+            "\n===== STEP 2 FFMPEG ERROR =====",
             flush=True
         )
 
         print(
-            result.stderr[-10000:],
+            result.stderr[-12000:],
             flush=True
         )
 
         raise RuntimeError(
-            "FFmpeg video rendering failed."
+            "4K final rendering failed."
         )
+
+    # ---------------------------------------------------------
+    # VERIFY OUTPUT
+    # ---------------------------------------------------------
 
     if not os.path.exists(
         output_path
@@ -503,6 +555,20 @@ def generate_video(
         f"{TARGET_WIDTH}x{TARGET_HEIGHT}",
         flush=True
     )
+
+    # ---------------------------------------------------------
+    # CLEAN TEMP FILE
+    # ---------------------------------------------------------
+
+    try:
+
+        os.remove(
+            temp_concat
+        )
+
+    except Exception:
+
+        pass
 
     print(
         "\n===== 5-CLIP 4K VIDEO SUCCESS =====",
