@@ -45,9 +45,7 @@ OPENING_TEXT_DURATION = 3.0
 # GET MEDIA DURATION
 # ============================================================
 
-def get_media_duration(
-    file_path: str
-) -> float:
+def get_media_duration(file_path: str) -> float:
 
     command = [
         "ffprobe",
@@ -591,18 +589,18 @@ def generate_video(
         )
 
     # ========================================================
-    # OPENING TEXT
+    # TEST OPENING TEXT
     #
     # Example:
     #
-    # AI TRADING EXAMPLE: $1537 EVERY DAY
+    # I MADE: $1268 EVERY DAY
     # LINK IN BIO
     #
     # The colon is escaped for FFmpeg.
     # ========================================================
 
     opening_text = (
-        f"AI TRADING EXAMPLE\\: "
+        f"I MADE\\: "
         f"${short_amount} EVERY DAY"
     )
 
@@ -812,7 +810,7 @@ def generate_video(
     )
 
     print(
-        f"Random demo amount: "
+        f"Random test amount: "
         f"${short_amount}",
         flush=True
     )
@@ -823,7 +821,7 @@ def generate_video(
     )
 
     print(
-        f"I MADE : "
+        f"I MADE: "
         f"${short_amount} EVERY DAY",
         flush=True
     )
