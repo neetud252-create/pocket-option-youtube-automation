@@ -1,5 +1,6 @@
 import os
 import time
+import random
 import threading
 
 from datetime import datetime, timezone
@@ -13,12 +14,13 @@ OUTPUT_DIR = "/app/output"
 
 
 # ============================================================
-# AMOUNT SHOWN ON THE OPENING TEXT
+# RANDOM DEMO AMOUNT
+# Every new video gets a random amount from $1000 to $2000
 # ============================================================
 
-SHORT_AMOUNT = os.getenv(
-    "SHORT_AMOUNT",
-    "1620"
+SHORT_AMOUNT = random.randint(
+    1000,
+    2000
 )
 
 
@@ -79,7 +81,7 @@ def main():
     )
 
     print(
-        "ELEVENLABS + 5 CLIPS + 4K",
+        "ELEVENLABS + RANDOM DEMO AMOUNT + 5 CLIPS + 4K",
         flush=True
     )
 
@@ -139,29 +141,38 @@ def main():
     )
 
     # --------------------------------------------------------
-    # SHOW CURRENT AMOUNT
+    # RANDOM DEMO AMOUNT
     # --------------------------------------------------------
 
     print(
-        "\nOpening text amount:",
+        "\n===== RANDOM DEMO AMOUNT =====",
         flush=True
     )
 
     print(
-        f"${SHORT_AMOUNT}",
+        f"Selected amount: ${SHORT_AMOUNT}",
         flush=True
     )
 
     print(
-        "Opening text duration: 3 seconds",
+        "Range: $1,000 - $2,000",
+        flush=True
+    )
+
+    print(
+        "This amount is displayed as an example.",
+        flush=True
+    )
+
+    print(
+        "==============================",
         flush=True
     )
 
     # --------------------------------------------------------
     # TEMPORARY TEST SCRIPT
     # --------------------------------------------------------
-    # Gemini is temporarily bypassed because the previous
-    # Gemini free quota was exhausted.
+    # Gemini is temporarily bypassed.
     # --------------------------------------------------------
 
     bot_text = (
@@ -241,7 +252,7 @@ def main():
         )
 
         print(
-            f"Voice created successfully:",
+            "Voice created successfully:",
             flush=True
         )
 
@@ -325,7 +336,7 @@ def main():
         )
 
         print(
-            "\nOpen this URL:",
+            "\nOpen:",
             flush=True
         )
 
