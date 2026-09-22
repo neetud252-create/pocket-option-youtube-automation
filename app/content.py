@@ -1,267 +1,552 @@
-import time
+import os
+import json
+import random
+import re
 
 from google import genai
-from google.genai import types
+
+from app.config import (
+    GEMINI_API_KEY,
+    GEMINI_MODEL
+)
 
 
-MODEL_NAME = "gemini-3.5-flash"
+# ============================================================
+# STORAGE
+# ============================================================
+
+DATA_DIR = "/app/data"
+
+HISTORY_FILE = os.path.join(
+    DATA_DIR,
+    "content_history.json"
+)
 
 
-SYSTEM_PROMPT = """
-You are a professional YouTube Shorts scriptwriter.
+# ============================================================
+# LOAD HISTORY
+# ============================================================
 
-Create ONE original spoken script for a YouTube Short about an AI
-trading bot.
+def load_history():
 
-The Short has TWO clearly separated parts.
-
-PART 1 — TRADING BOT
-
-The first half should explain one useful concept about the AI
-trading bot.
-
-PART 2 — CTA
-
-The second half should naturally tell interested viewers to open
-the YouTube Related Video and watch the complete setup tutorial.
-
-The CTA must communicate this idea:
-
-"Tap the Related Video below the title to watch the complete setup
-tutorial."
-
-Naturally change the wording every time.
-
-LENGTH:
-
-42–48 words total.
-
-The BOT section should contain approximately 20–24 words.
-
-The CTA section should contain approximately 20–24 words.
-
-The complete script should normally produce approximately
-15–20 seconds of natural narration.
-
-Every script must be substantially different.
-
-Vary:
-
-- hook
-- trading concept
-- explanation
-- sentence structure
-- CTA wording
-
-Never:
-
-- promise profits
-- guarantee winning trades
-- guarantee signals
-- claim the bot cannot lose
-- invent statistics
-- invent profits
-- invent trading results
-- fabricate screenshots
-- fabricate testimonials
-- use fake urgency
-- use misleading claims
-
-Do not write:
-
-- title
-- hashtags
-- bullet points
-- scene directions
-- timestamps
-
-Return ONLY the script using this exact format:
-
-BOT:
-[bot explanation]
-
-CTA:
-[CTA]
-"""
-
-
-def generate_script(
-    topic: str,
-    previous_topics=None
-):
-
-    api_key = None
-
-    import os
-
-    api_key = os.getenv(
-        "GEMINI_API_KEY"
+    os.makedirs(
+        DATA_DIR,
+        exist_ok=True
     )
 
-    if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY is not configured."
+    if not os.path.exists(
+        HISTORY_FILE
+    ):
+
+        return {
+            "scripts": [],
+            "titles": []
+        }
+
+    try:
+
+        with open(
+            HISTORY_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            data = json.load(
+                file
+            )
+
+        return {
+            "scripts": data.get(
+                "scripts",
+                []
+            ),
+            "titles": data.get(
+                "titles",
+                []
+            )
+        }
+
+    except Exception as e:
+
+        print(
+            f"History load error: {e}",
+            flush=True
         )
 
-    client = genai.Client(
-        api_key=api_key
+        return {
+            "scripts": [],
+            "titles": []
+        }
+
+
+# ============================================================
+# SAVE HISTORY
+# ============================================================
+
+def save_history(
+    history
+):
+
+    os.makedirs(
+        DATA_DIR,
+        exist_ok=True
     )
 
-    previous = ", ".join(
-        previous_topics or []
+    history["scripts"] = (
+        history["scripts"][-200:]
     )
 
-    if not previous:
-        previous = "None"
+    history["titles"] = (
+        history["titles"][-200:]
+    )
 
-    prompt = f"""
-{SYSTEM_PROMPT}
+    with open(
+        HISTORY_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
 
-TOPIC:
-{topic}
+        json.dump(
+            history,
+            file,
+            indent=2,
+            ensure_ascii=False
+        )
 
-PREVIOUSLY USED TOPICS:
-{previous}
 
-Create a completely new script.
+# ============================================================
+# FALLBACK CONTENT
+# ============================================================
 
-Do not repeat previous wording.
+FALLBACK_CONTENT = [
 
-Remember:
+    (
+        "What happens when an AI trading bot studies "
+        "the market instead of relying only on guesswork? "
+        "It can organize chart information, identify "
+        "patterns, and help you follow a defined strategy. "
+        "Want to see the complete setup? Tap the Related "
+        "Video below the title.",
+        "Pocket Option AI Bot: How Does It Actually Work?"
+    ),
 
-42–48 words total.
+    (
+        "Reading a trading chart manually can take time. "
+        "An AI trading bot can analyze price movement "
+        "and organize the information into a clearer "
+        "trading setup. The important part is using signals "
+        "with proper risk management. See the full setup "
+        "in the Related Video.",
+        "Pocket Option AI Trading Bot Explained"
+    ),
 
-BOT = approximately first half.
+    (
+        "Can AI help organize a Pocket Option trading setup? "
+        "An AI bot can analyze chart data, look for patterns, "
+        "and present information in a structured way. "
+        "It does not remove trading risk, so risk management "
+        "still matters. Watch the Related Video for the "
+        "complete setup.",
+        "Pocket Option AI Bot Trading Setup"
+    ),
 
-CTA = approximately second half.
+    (
+        "Instead of watching every candle manually, an AI "
+        "trading system can help analyze price movement "
+        "and chart patterns in a structured process. "
+        "The goal is consistency, not guessing. "
+        "Tap the Related Video below the title to see "
+        "the complete bot setup.",
+        "Pocket Option AI Trading Bot: Complete Setup"
+    ),
 
-The CTA must clearly tell viewers to tap the Related Video below
-the title to watch the complete setup tutorial.
+    (
+        "One interesting use of AI in trading is automated "
+        "chart analysis. The system can examine price "
+        "movement and patterns and organize the information "
+        "for a trader. Always consider risk before trading. "
+        "Watch the Related Video to see how the setup works.",
+        "Pocket Option AI Bot: AI Chart Analysis"
+    ),
 
-Return only:
+    (
+        "AI trading tools can help turn large amounts of "
+        "chart information into a more structured process. "
+        "A Pocket Option AI bot can analyze patterns and "
+        "price movement, while the trader still controls "
+        "risk and execution. Watch the Related Video for "
+        "the complete setup.",
+        "Pocket Option AI Trading Bot: Market Analysis"
+    ),
 
-BOT:
-...
+    (
+        "Why are traders exploring AI for chart analysis? "
+        "An AI trading bot can process price movement and "
+        "patterns quickly and organize them into signals "
+        "or trading information. AI does not eliminate risk. "
+        "See the complete setup in the Related Video.",
+        "Pocket Option AI Bot: AI Market Analysis"
+    ),
 
-CTA:
-...
+    (
+        "A trading bot is not just about automation. "
+        "It can also organize chart analysis into a repeatable "
+        "process. With a Pocket Option AI bot, market data "
+        "and patterns can be analyzed systematically. "
+        "Watch the Related Video to see the setup.",
+        "Pocket Option AI Trading Bot: How It Analyzes Charts"
+    ),
+
+    (
+        "Candlestick charts contain a lot of information. "
+        "An AI trading bot can help analyze price movement "
+        "and recognize patterns in a structured way. "
+        "Risk management is still essential when trading. "
+        "Tap the Related Video for the full tutorial.",
+        "Pocket Option AI Bot: Candlestick Analysis"
+    ),
+
+    (
+        "What can an AI trading bot actually analyze? "
+        "It can process chart data, price movement, and "
+        "technical patterns to organize information for "
+        "a trading setup. It cannot guarantee a result. "
+        "See the complete Pocket Option setup in the "
+        "Related Video.",
+        "Pocket Option AI Trading Bot: What It Analyzes"
+    )
+
+]
+
+
+# ============================================================
+# CLEAN GEMINI RESPONSE
+# ============================================================
+
+def clean_response(
+    text
+):
+
+    text = text.strip()
+
+    text = text.replace(
+        "```json",
+        ""
+    )
+
+    text = text.replace(
+        "```",
+        ""
+    )
+
+    return text.strip()
+
+
+# ============================================================
+# GEMINI GENERATOR
+# ============================================================
+
+def generate_with_gemini(
+    history
+):
+
+    if not GEMINI_API_KEY:
+
+        print(
+            "GEMINI_API_KEY not configured.",
+            flush=True
+        )
+
+        return None
+
+    try:
+
+        client = genai.Client(
+            api_key=GEMINI_API_KEY
+        )
+
+        previous_titles = "\n".join(
+            history["titles"][-30:]
+        )
+
+        previous_scripts = "\n".join(
+            history["scripts"][-20:]
+        )
+
+        prompt = f"""
+Create ONE completely original YouTube Shorts script
+about Pocket Option AI Bot or Pocket Option AI Trading Bot.
+
+This is for an educational short-form channel.
+
+IMPORTANT:
+- Make this script substantially different from all
+  previous scripts.
+- Do not reuse previous wording.
+- Use a different hook.
+- Use a different explanation angle.
+- Use different sentence structure.
+- Do not repeat previous titles.
+
+Do NOT:
+- guarantee profits
+- guarantee accurate signals
+- claim guaranteed winning trades
+- invent earnings
+- fabricate trading results
+- claim AI removes trading risk
+
+The script should be approximately 35-55 words.
+
+The script should contain:
+1. A strong curiosity-based opening.
+2. Useful information about the AI trading bot.
+3. A natural explanation.
+4. A short CTA to the full tutorial.
+
+The title MUST naturally contain one of these:
+- Pocket Option AI Bot
+- Pocket Option AI Trading Bot
+
+Return ONLY valid JSON:
+
+{{
+  "title": "unique title here",
+  "script": "unique script here"
+}}
+
+PREVIOUS TITLES:
+{previous_titles}
+
+PREVIOUS SCRIPTS:
+{previous_scripts}
 """
 
-    last_error = None
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt
+        )
 
-    for attempt in range(3):
+        raw = response.text
 
-        try:
+        if not raw:
+
+            return None
+
+        raw = clean_response(
+            raw
+        )
+
+        data = json.loads(
+            raw
+        )
+
+        title = str(
+            data.get(
+                "title",
+                ""
+            )
+        ).strip()
+
+        script = str(
+            data.get(
+                "script",
+                ""
+            )
+        ).strip()
+
+        if not title:
+
+            return None
+
+        if not script:
+
+            return None
+
+        # ----------------------------------------------------
+        # CHECK TITLE
+        # ----------------------------------------------------
+
+        existing_titles = [
+            x.lower().strip()
+            for x in history["titles"]
+        ]
+
+        if title.lower().strip() in existing_titles:
 
             print(
-                f"Calling Gemini model: {MODEL_NAME}",
+                "Gemini returned a duplicate title.",
                 flush=True
             )
 
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    max_output_tokens=500,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level="minimal"
-                    ),
-                ),
-            )
+            return None
 
-            if not response.text:
-                raise RuntimeError(
-                    "Gemini returned an empty response."
-                )
+        # ----------------------------------------------------
+        # CHECK SCRIPT
+        # ----------------------------------------------------
 
-            raw = response.text.strip()
+        existing_scripts = [
+            x.lower().strip()
+            for x in history["scripts"]
+        ]
+
+        if script.lower().strip() in existing_scripts:
 
             print(
-                "\n===== GEMINI RESPONSE =====",
+                "Gemini returned a duplicate script.",
                 flush=True
             )
 
-            print(
-                raw,
-                flush=True
-            )
+            return None
 
-            print(
-                "==========================",
-                flush=True
-            )
+        return {
+            "title": title,
+            "script": script
+        }
 
-            if "BOT:" not in raw:
-                raise RuntimeError(
-                    "Gemini did not return BOT section."
-                )
+    except Exception as e:
 
-            if "CTA:" not in raw:
-                raise RuntimeError(
-                    "Gemini did not return CTA section."
-                )
+        print(
+            "\n===== GEMINI GENERATION ERROR =====",
+            flush=True
+        )
 
-            bot_text = raw.split(
-                "BOT:",
-                1
-            )[1].split(
-                "CTA:",
-                1
-            )[0].strip()
+        print(
+            str(e),
+            flush=True
+        )
 
-            cta_text = raw.split(
-                "CTA:",
-                1
-            )[1].strip()
+        print(
+            "Using fallback content.",
+            flush=True
+        )
 
-            full_script = (
-                f"{bot_text} {cta_text}"
-            )
+        return None
 
-            word_count = len(
-                full_script.split()
-            )
 
-            print(
-                f"Generated {word_count} words.",
-                flush=True
-            )
+# ============================================================
+# MAIN CONTENT GENERATOR
+# ============================================================
 
-            if word_count < 42:
-                raise RuntimeError(
-                    f"Script too short: "
-                    f"{word_count} words."
-                )
+def generate_content():
 
-            if word_count > 48:
-                raise RuntimeError(
-                    f"Script too long: "
-                    f"{word_count} words."
-                )
+    history = load_history()
 
-            return {
-                "bot": bot_text,
-                "cta": cta_text,
-                "full": full_script
-            }
+    # --------------------------------------------------------
+    # TRY GEMINI
+    # --------------------------------------------------------
 
-        except Exception as e:
-
-            last_error = e
-
-            print(
-                f"Gemini attempt "
-                f"{attempt + 1}/3 failed: {e}",
-                flush=True
-            )
-
-            if attempt < 2:
-
-                delay = 5 * (2 ** attempt)
-
-                time.sleep(delay)
-
-    raise RuntimeError(
-        f"Gemini failed after 3 attempts: "
-        f"{last_error}"
+    generated = generate_with_gemini(
+        history
     )
+
+    if generated:
+
+        title = generated[
+            "title"
+        ]
+
+        script = generated[
+            "script"
+        ]
+
+        print(
+            "\nUsing NEW Gemini-generated content.",
+            flush=True
+        )
+
+    else:
+
+        # ----------------------------------------------------
+        # FALLBACK
+        # ----------------------------------------------------
+
+        used_titles = [
+            x.lower().strip()
+            for x in history["titles"]
+        ]
+
+        available = [
+
+            item
+            for item in FALLBACK_CONTENT
+
+            if item[1].lower().strip()
+            not in used_titles
+        ]
+
+        if not available:
+
+            available = (
+                FALLBACK_CONTENT
+            )
+
+        script, title = random.choice(
+            available
+        )
+
+        print(
+            "\nUsing unique fallback content.",
+            flush=True
+        )
+
+    # --------------------------------------------------------
+    # SAVE HISTORY
+    # --------------------------------------------------------
+
+    history["scripts"].append(
+        script
+    )
+
+    history["titles"].append(
+        title
+    )
+
+    save_history(
+        history
+    )
+
+    # --------------------------------------------------------
+    # LOG
+    # --------------------------------------------------------
+
+    print(
+        "\n" + "=" * 60,
+        flush=True
+    )
+
+    print(
+        "NEW SHORT CONTENT",
+        flush=True
+    )
+
+    print(
+        "=" * 60,
+        flush=True
+    )
+
+    print(
+        f"TITLE:\n{title}",
+        flush=True
+    )
+
+    print(
+        f"\nSCRIPT:\n{script}",
+        flush=True
+    )
+
+    print(
+        f"\nScript words: "
+        f"{len(script.split())}",
+        flush=True
+    )
+
+    print(
+        "=" * 60,
+        flush=True
+    )
+
+    return {
+        "title": title,
+        "script": script
+    }
