@@ -4,11 +4,16 @@ import subprocess
 import json
 
 
+# ============================================================
+# PATHS
+# ============================================================
+
 BASE_DIR = os.path.dirname(
     os.path.dirname(
         os.path.abspath(__file__)
     )
 )
+
 
 FOOTAGE_DIR = os.path.join(
     BASE_DIR,
@@ -16,10 +21,16 @@ FOOTAGE_DIR = os.path.join(
     "footage"
 )
 
+
 OUTPUT_DIR = os.path.join(
     BASE_DIR,
     "output"
 )
+
+
+# ============================================================
+# VIDEO SETTINGS
+# ============================================================
 
 TARGET_WIDTH = 2160
 TARGET_HEIGHT = 3840
@@ -29,8 +40,16 @@ NUMBER_OF_CLIPS = 5
 MIN_DURATION = 15.0
 MAX_DURATION = 20.0
 
+OPENING_TEXT_DURATION = 3.0
 
-def get_media_duration(file_path: str) -> float:
+
+# ============================================================
+# GET MEDIA DURATION
+# ============================================================
+
+def get_media_duration(
+    file_path: str
+) -> float:
 
     command = [
         "ffprobe",
@@ -52,7 +71,8 @@ def get_media_duration(file_path: str) -> float:
     if result.returncode != 0:
 
         raise RuntimeError(
-            f"Could not read media duration: {file_path}"
+            f"Could not read media duration: "
+            f"{file_path}"
         )
 
     data = json.loads(
@@ -64,12 +84,21 @@ def get_media_duration(file_path: str) -> float:
     )
 
 
-def validate_video(file_path: str):
+# ============================================================
+# VALIDATE VIDEO
+# ============================================================
 
-    if not os.path.exists(file_path):
+def validate_video(
+    file_path: str
+):
+
+    if not os.path.exists(
+        file_path
+    ):
 
         raise FileNotFoundError(
-            f"Video not found: {file_path}"
+            f"Video not found: "
+            f"{file_path}"
         )
 
     duration = get_media_duration(
@@ -79,7 +108,8 @@ def validate_video(file_path: str):
     if duration <= 0:
 
         raise RuntimeError(
-            f"Invalid video: {file_path}"
+            f"Invalid video: "
+            f"{file_path}"
         )
 
     print(
@@ -91,6 +121,10 @@ def validate_video(file_path: str):
 
     return duration
 
+
+# ============================================================
+# GET ELEVENLABS CTA TIMING
+# ============================================================
 
 def get_cta_timing(
     voice_path: str,
@@ -105,7 +139,7 @@ def get_cta_timing(
     )
 
     print(
-        f"\nLooking for ElevenLabs timing metadata:",
+        "\nLooking for ElevenLabs timing metadata:",
         flush=True
     )
 
@@ -142,10 +176,16 @@ def get_cta_timing(
             )
 
             if cta_start is not None:
-                cta_start = float(cta_start)
+
+                cta_start = float(
+                    cta_start
+                )
 
             if cta_end is not None:
-                cta_end = float(cta_end)
+
+                cta_end = float(
+                    cta_end
+                )
 
             print(
                 f"ElevenLabs CTA start: "
@@ -162,11 +202,15 @@ def get_cta_timing(
         except Exception as e:
 
             print(
-                f"Could not read timing metadata: {e}",
+                f"Could not read timing metadata: "
+                f"{e}",
                 flush=True
             )
 
+    # --------------------------------------------------------
     # FALLBACK
+    # --------------------------------------------------------
+
     if (
         cta_start is None
         or cta_end is None
@@ -188,7 +232,9 @@ def get_cta_timing(
 
         cta_end = final_duration
 
+    # --------------------------------------------------------
     # SAFETY LIMITS
+    # --------------------------------------------------------
 
     cta_start = max(
         0.0,
@@ -206,13 +252,21 @@ def get_cta_timing(
         )
     )
 
-    return cta_start, cta_end
+    return (
+        cta_start,
+        cta_end
+    )
 
+
+# ============================================================
+# GENERATE VIDEO
+# ============================================================
 
 def generate_video(
     script: str,
     voice_path: str,
-    output_filename: str = "short.mp4"
+    output_filename: str = "short.mp4",
+    short_amount: str = "1620"
 ) -> str:
 
     os.makedirs(
@@ -220,9 +274,9 @@ def generate_video(
         exist_ok=True
     )
 
-    # --------------------------------------------------
-    # FIND FOOTAGE
-    # --------------------------------------------------
+    # ========================================================
+    # FIND ALL FOOTAGE
+    # ========================================================
 
     all_clips = []
 
@@ -255,9 +309,9 @@ def generate_video(
             f"Found {len(all_clips)}."
         )
 
-    # --------------------------------------------------
+    # ========================================================
     # SELECT EXACTLY 5 RANDOM CLIPS
-    # --------------------------------------------------
+    # ========================================================
 
     selected_clips = random.sample(
         all_clips,
@@ -293,9 +347,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------
+    # ========================================================
     # VOICE DURATION
-    # --------------------------------------------------
+    # ========================================================
 
     voice_duration = get_media_duration(
         voice_path
@@ -317,7 +371,8 @@ def generate_video(
         raise RuntimeError(
             f"Voice is only "
             f"{final_duration:.2f}s. "
-            f"Need at least {MIN_DURATION}s."
+            f"Need at least "
+            f"{MIN_DURATION:.2f}s."
         )
 
     print(
@@ -326,9 +381,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------
-    # ELEVENLABS CTA TIMING
-    # --------------------------------------------------
+    # ========================================================
+    # CTA TIMING
+    # ========================================================
 
     cta_start, cta_end = get_cta_timing(
         voice_path,
@@ -341,12 +396,14 @@ def generate_video(
     )
 
     print(
-        f"CTA starts: {cta_start:.2f}s",
+        f"CTA starts: "
+        f"{cta_start:.2f}s",
         flush=True
     )
 
     print(
-        f"CTA ends:   {cta_end:.2f}s",
+        f"CTA ends: "
+        f"{cta_end:.2f}s",
         flush=True
     )
 
@@ -355,9 +412,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------
+    # ========================================================
     # CLIP DURATION
-    # --------------------------------------------------
+    # ========================================================
 
     clip_duration = (
         final_duration
@@ -371,9 +428,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------
+    # ========================================================
     # TEMPORARY 1080P FILE
-    # --------------------------------------------------
+    # ========================================================
 
     temp_concat = os.path.join(
         OUTPUT_DIR,
@@ -388,10 +445,10 @@ def generate_video(
             temp_concat
         )
 
-    # --------------------------------------------------
+    # ========================================================
     # STEP 1
     # CREATE 1080P CLIP SEQUENCE
-    # --------------------------------------------------
+    # ========================================================
 
     filter_parts = []
 
@@ -402,7 +459,9 @@ def generate_video(
         filter_parts.append(
             (
                 f"[{index}:v]"
-                f"trim=duration={clip_duration:.4f},"
+                f"trim="
+                f"duration="
+                f"{clip_duration:.4f},"
                 f"setpts=PTS-STARTPTS,"
                 f"scale=1080:1920:"
                 f"force_original_aspect_ratio=increase:"
@@ -428,7 +487,9 @@ def generate_video(
             f"n={NUMBER_OF_CLIPS}:"
             f"v=1:"
             f"a=0,"
-            f"trim=duration={final_duration:.4f},"
+            f"trim="
+            f"duration="
+            f"{final_duration:.4f},"
             f"setpts=PTS-STARTPTS"
             f"[concatvideo]"
         )
@@ -483,7 +544,8 @@ def generate_video(
     ])
 
     print(
-        "\nStep 1/2: Creating 1080p clip sequence...",
+        "\nStep 1/2: "
+        "Creating 1080p clip sequence...",
         flush=True
     )
 
@@ -514,13 +576,14 @@ def generate_video(
     ):
 
         raise RuntimeError(
-            "Temporary clip sequence was not created."
+            "Temporary clip sequence "
+            "was not created."
         )
 
-    # --------------------------------------------------
+    # ========================================================
     # STEP 2
-    # UPSCALE + CTA ARROW + AUDIO
-    # --------------------------------------------------
+    # 4K + OPENING TEXT + CTA ARROW + AUDIO
+    # ========================================================
 
     output_path = os.path.join(
         OUTPUT_DIR,
@@ -535,18 +598,76 @@ def generate_video(
             output_path
         )
 
-    # Arrow appears only during CTA.
-    #
-    # Position is toward the upper section of
-    # the Short so it visually points toward
-    # the Related Video area below the title.
+    # ========================================================
+    # FINAL FILTER
+    # ========================================================
 
     final_filter = (
+
         "[0:v]"
+
+        # ----------------------------------------------------
+        # UPSCALE TO 4K
+        # ----------------------------------------------------
+
         "scale=2160:3840:"
         "flags=lanczos,"
+
+        # ----------------------------------------------------
+        # IMAGE ENHANCEMENT
+        # ----------------------------------------------------
+
         "unsharp=5:5:0.45:5:5:0,"
         "eq=contrast=1.02:saturation=1.03,"
+
+        # ====================================================
+        # OPENING TEXT
+        # FIRST 3 SECONDS
+        # ====================================================
+
+        # LINE 1
+        "drawtext="
+        "fontfile=/usr/share/fonts/truetype/"
+        "dejavu/DejaVuSans-Bold.ttf:"
+        f"text='I MADE ${short_amount} TODAY':"
+        "fontcolor=#9CFF00:"
+        "bordercolor=black:"
+        "borderw=12:"
+        "fontsize=112:"
+        "x=(w-text_w)/2:"
+        "y=430:"
+        "enable='between(t,0,3)',"
+
+        # LINE 2
+        "drawtext="
+        "fontfile=/usr/share/fonts/truetype/"
+        "dejavu/DejaVuSans-Bold.ttf:"
+        "text='USING AI':"
+        "fontcolor=#FFF500:"
+        "bordercolor=black:"
+        "borderw=12:"
+        "fontsize=118:"
+        "x=(w-text_w)/2:"
+        "y=570:"
+        "enable='between(t,0,3)',"
+
+        # LINE 3
+        "drawtext="
+        "fontfile=/usr/share/fonts/truetype/"
+        "dejavu/DejaVuSans-Bold.ttf:"
+        "text='LINK IN BIO':"
+        "fontcolor=#FFF500:"
+        "bordercolor=black:"
+        "borderw=10:"
+        "fontsize=105:"
+        "x=(w-text_w)/2:"
+        "y=720:"
+        "enable='between(t,0,3)',"
+
+        # ====================================================
+        # CTA ARROW
+        # ====================================================
+
         "drawtext="
         "fontfile=/usr/share/fonts/truetype/"
         "dejavu/DejaVuSans-Bold.ttf:"
@@ -557,9 +678,16 @@ def generate_video(
         "fontsize=260:"
         "x=(w-text_w)/2:"
         "y=650:"
-        f"enable='between(t,{cta_start:.3f},{cta_end:.3f})'"
+        f"enable='between(t,"
+        f"{cta_start:.3f},"
+        f"{cta_end:.3f})'"
+
         "[finalvideo]"
     )
+
+    # ========================================================
+    # FFMPEG FINAL RENDER
+    # ========================================================
 
     command = [
         "ffmpeg",
@@ -611,8 +739,9 @@ def generate_video(
     ]
 
     print(
-        "\nStep 2/2: Upscaling to 4K "
-        "and adding timed CTA arrow...",
+        "\nStep 2/2: "
+        "Upscaling to 4K + opening text "
+        "+ CTA arrow...",
         flush=True
     )
 
@@ -638,9 +767,9 @@ def generate_video(
             "4K final rendering failed."
         )
 
-    # --------------------------------------------------
+    # ========================================================
     # VERIFY OUTPUT
-    # --------------------------------------------------
+    # ========================================================
 
     if not os.path.exists(
         output_path
@@ -682,9 +811,21 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------
+    print(
+        f"Opening text amount: "
+        f"${short_amount}",
+        flush=True
+    )
+
+    print(
+        "Opening text duration: "
+        f"{OPENING_TEXT_DURATION:.2f}s",
+        flush=True
+    )
+
+    # ========================================================
     # REMOVE TEMP FILE
-    # --------------------------------------------------
+    # ========================================================
 
     try:
 
@@ -702,7 +843,8 @@ def generate_video(
     )
 
     print(
-        f"Final video: {output_path}",
+        f"Final video: "
+        f"{output_path}",
         flush=True
     )
 
