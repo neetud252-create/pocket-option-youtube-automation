@@ -14,13 +14,11 @@ BASE_DIR = os.path.dirname(
     )
 )
 
-
 FOOTAGE_DIR = os.path.join(
     BASE_DIR,
     "assets",
     "footage"
 )
-
 
 OUTPUT_DIR = os.path.join(
     BASE_DIR,
@@ -123,7 +121,7 @@ def validate_video(
 
 
 # ============================================================
-# GET ELEVENLABS CTA TIMING
+# ELEVENLABS CTA TIMING
 # ============================================================
 
 def get_cta_timing(
@@ -266,7 +264,7 @@ def generate_video(
     script: str,
     voice_path: str,
     output_filename: str = "short.mp4",
-    short_amount: str = "1620"
+    short_amount: int = 1500
 ) -> str:
 
     os.makedirs(
@@ -446,8 +444,7 @@ def generate_video(
         )
 
     # ========================================================
-    # STEP 1
-    # CREATE 1080P CLIP SEQUENCE
+    # STEP 1 — 1080P CLIP SEQUENCE
     # ========================================================
 
     filter_parts = []
@@ -581,8 +578,7 @@ def generate_video(
         )
 
     # ========================================================
-    # STEP 2
-    # 4K + OPENING TEXT + CTA ARROW + AUDIO
+    # STEP 2 — 4K + OPENING TEXT + RED ANIMATED ARROW
     # ========================================================
 
     output_path = os.path.join(
@@ -599,7 +595,7 @@ def generate_video(
         )
 
     # ========================================================
-    # FINAL FILTER
+    # FINAL VIDEO FILTER
     # ========================================================
 
     final_filter = (
@@ -607,7 +603,7 @@ def generate_video(
         "[0:v]"
 
         # ----------------------------------------------------
-        # UPSCALE TO 4K
+        # 4K UPSCALE
         # ----------------------------------------------------
 
         "scale=2160:3840:"
@@ -621,19 +617,18 @@ def generate_video(
         "eq=contrast=1.02:saturation=1.03,"
 
         # ====================================================
-        # OPENING TEXT
-        # FIRST 3 SECONDS
+        # OPENING TEXT — FIRST 3 SECONDS
         # ====================================================
 
         # LINE 1
         "drawtext="
         "fontfile=/usr/share/fonts/truetype/"
         "dejavu/DejaVuSans-Bold.ttf:"
-        f"text='I MADE ${short_amount} TODAY':"
+        f"text='AI TRADING EXAMPLE: ${short_amount}':"
         "fontcolor=#9CFF00:"
         "bordercolor=black:"
         "borderw=12:"
-        "fontsize=112:"
+        "fontsize=105:"
         "x=(w-text_w)/2:"
         "y=430:"
         "enable='between(t,0,3)',"
@@ -648,7 +643,7 @@ def generate_video(
         "borderw=12:"
         "fontsize=118:"
         "x=(w-text_w)/2:"
-        "y=570:"
+        "y=580:"
         "enable='between(t,0,3)',"
 
         # LINE 3
@@ -661,23 +656,32 @@ def generate_video(
         "borderw=10:"
         "fontsize=105:"
         "x=(w-text_w)/2:"
-        "y=720:"
+        "y=730:"
         "enable='between(t,0,3)',"
 
         # ====================================================
-        # CTA ARROW
+        # RED ANIMATED ARROW
+        # ====================================================
+        #
+        # Arrow is now near the BOTTOM.
+        #
+        # It continuously moves up/down during the CTA.
+        #
+        # 2160x3840 video:
+        # Y around 3200 = lower portion of screen.
+        #
         # ====================================================
 
         "drawtext="
         "fontfile=/usr/share/fonts/truetype/"
         "dejavu/DejaVuSans-Bold.ttf:"
         "text='↓':"
-        "fontcolor=white:"
+        "fontcolor=#FF0000:"
         "bordercolor=black:"
-        "borderw=10:"
-        "fontsize=260:"
+        "borderw=14:"
+        "fontsize=300:"
         "x=(w-text_w)/2:"
-        "y=650:"
+        "y=3200+70*sin(t*8):"
         f"enable='between(t,"
         f"{cta_start:.3f},"
         f"{cta_end:.3f})'"
@@ -686,7 +690,7 @@ def generate_video(
     )
 
     # ========================================================
-    # FFMPEG FINAL RENDER
+    # FINAL FFMPEG RENDER
     # ========================================================
 
     command = [
@@ -741,7 +745,7 @@ def generate_video(
     print(
         "\nStep 2/2: "
         "Upscaling to 4K + opening text "
-        "+ CTA arrow...",
+        "+ animated red CTA arrow...",
         flush=True
     )
 
@@ -812,7 +816,7 @@ def generate_video(
     )
 
     print(
-        f"Opening text amount: "
+        f"Random demo amount: "
         f"${short_amount}",
         flush=True
     )
@@ -823,8 +827,13 @@ def generate_video(
         flush=True
     )
 
+    print(
+        "CTA arrow: RED + ANIMATED + BOTTOM",
+        flush=True
+    )
+
     # ========================================================
-    # REMOVE TEMP FILE
+    # REMOVE TEMPORARY FILE
     # ========================================================
 
     try:
