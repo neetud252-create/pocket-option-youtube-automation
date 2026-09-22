@@ -12,9 +12,24 @@ from app.video import generate_video
 OUTPUT_DIR = "/app/output"
 
 
+# ============================================================
+# AMOUNT SHOWN ON THE OPENING TEXT
+# ============================================================
+
+SHORT_AMOUNT = os.getenv(
+    "SHORT_AMOUNT",
+    "1620"
+)
+
+
+# ============================================================
+# VIDEO SERVER
+# ============================================================
+
 class VideoHandler(SimpleHTTPRequestHandler):
 
     def __init__(self, *args, **kwargs):
+
         super().__init__(
             *args,
             directory=OUTPUT_DIR,
@@ -32,7 +47,10 @@ def start_video_server():
     )
 
     server = ThreadingHTTPServer(
-        ("0.0.0.0", port),
+        (
+            "0.0.0.0",
+            port
+        ),
         VideoHandler
     )
 
@@ -44,25 +62,40 @@ def start_video_server():
     server.serve_forever()
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
 
-    print("=" * 60, flush=True)
-
     print(
-        "AI TRADING SHORTS - ELEVENLABS TEST",
+        "=" * 60,
         flush=True
     )
 
-    print("=" * 60, flush=True)
+    print(
+        "AI TRADING SHORTS AUTOMATION",
+        flush=True
+    )
+
+    print(
+        "ELEVENLABS + 5 CLIPS + 4K",
+        flush=True
+    )
+
+    print(
+        "=" * 60,
+        flush=True
+    )
 
     os.makedirs(
         OUTPUT_DIR,
         exist_ok=True
     )
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # START VIDEO SERVER
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     server_thread = threading.Thread(
         target=start_video_server,
@@ -71,9 +104,9 @@ def main():
 
     server_thread.start()
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # CHECK ELEVENLABS API KEY
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     elevenlabs_key = os.getenv(
         "ELEVENLABS_API_KEY"
@@ -94,8 +127,7 @@ def main():
         while True:
 
             print(
-                f"[HEARTBEAT] Waiting for configuration: "
-                f"{datetime.now(timezone.utc).isoformat()}",
+                "[HEARTBEAT] Waiting for ElevenLabs API key...",
                 flush=True
             )
 
@@ -106,15 +138,31 @@ def main():
         flush=True
     )
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # SHOW CURRENT AMOUNT
+    # --------------------------------------------------------
+
+    print(
+        "\nOpening text amount:",
+        flush=True
+    )
+
+    print(
+        f"${SHORT_AMOUNT}",
+        flush=True
+    )
+
+    print(
+        "Opening text duration: 3 seconds",
+        flush=True
+    )
+
+    # --------------------------------------------------------
     # TEMPORARY TEST SCRIPT
-    # --------------------------------------------------
-    # Gemini is bypassed temporarily because the
-    # current Gemini free-tier quota is exhausted.
-    #
-    # We will connect Gemini again after the complete
-    # ElevenLabs + video pipeline is working.
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # Gemini is temporarily bypassed because the previous
+    # Gemini free quota was exhausted.
+    # --------------------------------------------------------
 
     bot_text = (
         "An AI trading bot can study candlestick patterns "
@@ -169,13 +217,15 @@ def main():
 
     print(
         "\nWord count:",
-        len(full_script.split()),
+        len(
+            full_script.split()
+        ),
         flush=True
     )
 
-    # --------------------------------------------------
-    # GENERATE ELEVENLABS VOICE
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # ELEVENLABS VOICE
+    # --------------------------------------------------------
 
     try:
 
@@ -191,7 +241,12 @@ def main():
         )
 
         print(
-            f"Voice created successfully: {voice_path}",
+            f"Voice created successfully:",
+            flush=True
+        )
+
+        print(
+            voice_path,
             flush=True
         )
 
@@ -220,16 +275,15 @@ def main():
         while True:
 
             print(
-                f"[HEARTBEAT] Voice generation failed: "
-                f"{datetime.now(timezone.utc).isoformat()}",
+                "[HEARTBEAT] Voice generation failed.",
                 flush=True
             )
 
             time.sleep(300)
 
-    # --------------------------------------------------
-    # GENERATE VIDEO
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # VIDEO GENERATION
+    # --------------------------------------------------------
 
     try:
 
@@ -241,7 +295,8 @@ def main():
         video_path = generate_video(
             full_script,
             voice_path,
-            "test_short_4k.mp4"
+            "test_short_4k.mp4",
+            SHORT_AMOUNT
         )
 
         print(
@@ -260,12 +315,22 @@ def main():
         )
 
         print(
-            f"Final video: {video_path}",
+            f"Final video:",
             flush=True
         )
 
         print(
-            "Open /test_short_4k.mp4 on your Railway domain.",
+            video_path,
+            flush=True
+        )
+
+        print(
+            "\nOpen this URL:",
+            flush=True
+        )
+
+        print(
+            "/test_short_4k.mp4",
             flush=True
         )
 
@@ -291,9 +356,9 @@ def main():
             flush=True
         )
 
-    # --------------------------------------------------
-    # KEEP RAILWAY SERVICE ALIVE
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # KEEP RAILWAY ALIVE
+    # --------------------------------------------------------
 
     while True:
 
@@ -307,4 +372,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
