@@ -38,7 +38,8 @@ NUMBER_OF_CLIPS = 5
 MIN_DURATION = 15.0
 MAX_DURATION = 20.0
 
-OPENING_TEXT_DURATION = 3.0
+# OPENING TEXT NOW SHOWS FOR 5 SECONDS
+OPENING_TEXT_DURATION = 5.0
 
 
 # ============================================================
@@ -572,7 +573,7 @@ def generate_video(
         )
 
     # ========================================================
-    # STEP 2 — 4K + OPENING TEXT + RED ANIMATED ARROW
+    # STEP 2 — 4K + 5 SECOND OPENING + RED ARROW
     # ========================================================
 
     output_path = os.path.join(
@@ -589,14 +590,14 @@ def generate_video(
         )
 
     # ========================================================
-    # TEST OPENING TEXT
+    # OPENING TEXT
     #
     # Example:
     #
-    # I MADE: $1268 EVERY DAY
+    # I MADE: $1817 EVERY DAY
     # LINK IN BIO
     #
-    # The colon is escaped for FFmpeg.
+    # NOW VISIBLE FOR 5 SECONDS
     # ========================================================
 
     opening_text = (
@@ -627,7 +628,7 @@ def generate_video(
         "eq=contrast=1.02:saturation=1.03,"
 
         # ====================================================
-        # OPENING TEXT — FIRST 3 SECONDS
+        # OPENING TEXT — FIRST 5 SECONDS
         # ====================================================
 
         # ----------------------------------------------------
@@ -644,7 +645,7 @@ def generate_video(
         "fontsize=92:"
         "x=(w-text_w)/2:"
         "y=500:"
-        "enable='between(t,0,3)',"
+        "enable='between(t,0,5)',"
 
         # ----------------------------------------------------
         # LINE 2
@@ -660,7 +661,7 @@ def generate_video(
         "fontsize=120:"
         "x=(w-text_w)/2:"
         "y=680:"
-        "enable='between(t,0,3)',"
+        "enable='between(t,0,5)',"
 
         # ====================================================
         # RED ANIMATED BOTTOM ARROW
@@ -738,7 +739,7 @@ def generate_video(
 
     print(
         "\nStep 2/2: "
-        "Upscaling to 4K + opening text "
+        "Upscaling to 4K + 5-second opening text "
         "+ animated red bottom arrow...",
         flush=True
     )
