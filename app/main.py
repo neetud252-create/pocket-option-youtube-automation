@@ -1,9 +1,10 @@
 import os
 import time
+import json
 import threading
-import random
 
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from http.server import (
     ThreadingHTTPServer,
@@ -14,6 +15,9 @@ from urllib.parse import (
     urlparse,
     parse_qs
 )
+
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
 
 from app.voice import generate_voice
 from app.video import generate_video
@@ -31,16 +35,30 @@ from app.config import (
 # ============================================================
 
 OUTPUT_DIR = "/app/output"
-
 DATA_DIR = "/app/data"
 
+TIMEZONE = ZoneInfo(
+    "Asia/Kolkata"
+)
 
-# India timezone
-IST_OFFSET_SECONDS = 5 * 3600 + 30 * 60
+TOKEN_FILE = os.path.join(
+    DATA_DIR,
+    "youtube_token.json"
+)
+
+STATE_FILE = os.path.join(
+    DATA_DIR,
+    "oauth_state.txt"
+)
+
+VERIFIER_FILE = os.path.join(
+    DATA_DIR,
+    "oauth_code_verifier.txt"
+)
 
 
 # ============================================================
-# OAUTH CONFIG
+# GOOGLE OAUTH
 # ============================================================
 
 CLIENT_ID = os.getenv(
@@ -55,6 +73,11 @@ REDIRECT_URI = (
     "https://pocket-option-youtube-automation-production"
     ".up.railway.app/oauth2callback"
 )
+
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+]
 
 
 # ============================================================
@@ -73,10 +96,251 @@ os.makedirs(
 
 
 # ============================================================
-# VIDEO SERVER
+# OAUTH FLOW
 # ============================================================
 
-class VideoHandler(
+def create_oauth_flow(
+    code_verifier=None
+):
+
+    if not CLIENT_ID:
+
+        raise RuntimeError(
+            "YOUTUBE_CLIENT_ID is missing."
+        )
+
+    if not CLIENT_SECRET:
+
+        raise RuntimeError(
+            "YOUTUBE_CLIENT_SECRET is missing."
+        )
+
+    client_config = {
+
+        "web": {
+
+            "client_id": CLIENT_ID,
+
+            "client_secret": CLIENT_SECRET,
+
+            "auth_uri": (
+                "https://accounts.google.com/o/oauth2/auth"
+            ),
+
+            "token_uri": (
+                "https://oauth2.googleapis.com/token"
+            ),
+
+            "redirect_uris": [
+                REDIRECT_URI
+            ]
+        }
+    }
+
+    flow = Flow.from_client_config(
+
+        client_config,
+
+        scopes=SCOPES,
+
+        redirect_uri=REDIRECT_URI,
+
+        code_verifier=code_verifier,
+
+        autogenerate_code_verifier=(
+            code_verifier is None
+        )
+    )
+
+    return flow
+
+
+# ============================================================
+# SAVE CREDENTIALS
+# ============================================================
+
+def save_credentials(
+    credentials
+):
+
+    data = {
+
+        "token": credentials.token,
+
+        "refresh_token": credentials.refresh_token,
+
+        "token_uri": credentials.token_uri,
+
+        "client_id": credentials.client_id,
+
+        "client_secret": credentials.client_secret,
+
+        "scopes": credentials.scopes,
+    }
+
+    with open(
+        TOKEN_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            data,
+            file,
+            indent=2
+        )
+
+    print(
+        "YouTube credentials saved.",
+        flush=True
+    )
+
+
+# ============================================================
+# LOAD CREDENTIALS
+# ============================================================
+
+def load_credentials():
+
+    if not os.path.exists(
+        TOKEN_FILE
+    ):
+
+        return None
+
+    try:
+
+        return (
+            Credentials.from_authorized_user_file(
+                TOKEN_FILE,
+                SCOPES
+            )
+        )
+
+    except Exception as e:
+
+        print(
+            f"Credential load error: {e}",
+            flush=True
+        )
+
+        return None
+
+
+# ============================================================
+# SAVE OAUTH STATE
+# ============================================================
+
+def save_oauth_state(
+    state,
+    code_verifier
+):
+
+    with open(
+        STATE_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        file.write(
+            state
+        )
+
+    with open(
+        VERIFIER_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        file.write(
+            code_verifier
+        )
+
+
+# ============================================================
+# LOAD OAUTH STATE
+# ============================================================
+
+def load_oauth_state():
+
+    if not os.path.exists(
+        STATE_FILE
+    ):
+
+        return None
+
+    with open(
+        STATE_FILE,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        return file.read().strip()
+
+
+# ============================================================
+# LOAD CODE VERIFIER
+# ============================================================
+
+def load_code_verifier():
+
+    if not os.path.exists(
+        VERIFIER_FILE
+    ):
+
+        return None
+
+    with open(
+        VERIFIER_FILE,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        return file.read().strip()
+
+
+# ============================================================
+# CLEAR OAUTH TEMP DATA
+# ============================================================
+
+def clear_oauth_data():
+
+    for path in [
+        STATE_FILE,
+        VERIFIER_FILE
+    ]:
+
+        try:
+
+            if os.path.exists(
+                path
+            ):
+
+                os.remove(
+                    path
+                )
+
+        except Exception:
+
+            pass
+
+
+# ============================================================
+# CHECK YOUTUBE CONNECTION
+# ============================================================
+
+def youtube_connected():
+
+    return os.path.exists(
+        TOKEN_FILE
+    )
+
+
+# ============================================================
+# HTTP SERVER
+# ============================================================
+
+class AutomationHandler(
     BaseHTTPRequestHandler
 ):
 
@@ -91,6 +355,44 @@ class VideoHandler(
             flush=True
         )
 
+    # --------------------------------------------------------
+    # SEND HTML
+    # --------------------------------------------------------
+
+    def send_html(
+        self,
+        html,
+        status=200
+    ):
+
+        body = html.encode(
+            "utf-8"
+        )
+
+        self.send_response(
+            status
+        )
+
+        self.send_header(
+            "Content-Type",
+            "text/html; charset=utf-8"
+        )
+
+        self.send_header(
+            "Content-Length",
+            str(len(body))
+        )
+
+        self.end_headers()
+
+        self.wfile.write(
+            body
+        )
+
+    # --------------------------------------------------------
+    # GET
+    # --------------------------------------------------------
+
     def do_GET(self):
 
         parsed = urlparse(
@@ -99,128 +401,474 @@ class VideoHandler(
 
         path = parsed.path
 
-        if path == "/health":
-
-            body = b'{"status":"ok"}'
-
-            self.send_response(
-                200
-            )
-
-            self.send_header(
-                "Content-Type",
-                "application/json"
-            )
-
-            self.send_header(
-                "Content-Length",
-                str(len(body))
-            )
-
-            self.end_headers()
-
-            self.wfile.write(
-                body
-            )
-
-            return
+        # ====================================================
+        # HOME
+        # ====================================================
 
         if path == "/":
 
-            body = b"""
-            <html>
-            <body>
-            <h1>Pocket Option YouTube Automation</h1>
-            <p>Automation service is running.</p>
-            </body>
-            </html>
-            """
+            connected = youtube_connected()
 
-            self.send_response(
-                200
+            status = (
+                "✅ YouTube connected"
+                if connected
+                else "⚠️ YouTube not connected"
             )
 
-            self.send_header(
-                "Content-Type",
-                "text/html"
-            )
+            self.send_html(
+                f"""
+                <html>
 
-            self.send_header(
-                "Content-Length",
-                str(len(body))
-            )
+                <head>
+                <title>Pocket Option Automation</title>
+                </head>
 
-            self.end_headers()
+                <body>
 
-            self.wfile.write(
-                body
+                <h1>
+                Pocket Option YouTube Automation
+                </h1>
+
+                <p>
+                Status: {status}
+                </p>
+
+                <p>
+                Schedule:
+                10:00 AM IST and 6:00 PM IST
+                </p>
+
+                <p>
+                Related Video:
+                {RELATED_VIDEO_URL}
+                </p>
+
+                <p>
+                <a href="/authorize">
+                Connect / Reconnect YouTube
+                </a>
+                </p>
+
+                </body>
+
+                </html>
+                """
             )
 
             return
 
-        # Serve generated videos
-        if path.startswith(
-            "/output/"
-        ):
+        # ====================================================
+        # HEALTH
+        # ====================================================
 
-            filename = path.replace(
-                "/output/",
-                "",
-                1
+        if path == "/health":
+
+            self.send_html(
+                """
+                {
+                    "status": "ok"
+                }
+                """
             )
 
-            file_path = os.path.join(
-                OUTPUT_DIR,
-                filename
+            return
+
+        # ====================================================
+        # OAUTH AUTHORIZE
+        # ====================================================
+
+        if path == "/authorize":
+
+            try:
+
+                flow = create_oauth_flow()
+
+                authorization_url, state = (
+                    flow.authorization_url(
+
+                        access_type="offline",
+
+                        include_granted_scopes="true",
+
+                        prompt="consent"
+                    )
+                )
+
+                code_verifier = (
+                    flow.code_verifier
+                )
+
+                if not code_verifier:
+
+                    raise RuntimeError(
+                        "OAuth code verifier was not generated."
+                    )
+
+                save_oauth_state(
+                    state,
+                    code_verifier
+                )
+
+                self.send_response(
+                    302
+                )
+
+                self.send_header(
+                    "Location",
+                    authorization_url
+                )
+
+                self.end_headers()
+
+            except Exception as e:
+
+                self.send_html(
+                    f"""
+                    <html>
+
+                    <body>
+
+                    <h1>
+                    OAuth Error
+                    </h1>
+
+                    <pre>{e}</pre>
+
+                    </body>
+
+                    </html>
+                    """,
+                    500
+                )
+
+            return
+
+        # ====================================================
+        # OAUTH CALLBACK
+        # ====================================================
+
+        if path == "/oauth2callback":
+
+            query = parse_qs(
+                parsed.query
             )
 
-            if os.path.exists(
-                file_path
-            ):
+            error = query.get(
+                "error",
+                [None]
+            )[0]
 
-                try:
+            if error:
 
-                    with open(
-                        file_path,
-                        "rb"
-                    ) as file:
+                self.send_html(
+                    f"""
+                    <html>
 
-                        data = file.read()
+                    <body>
 
-                    self.send_response(
-                        200
-                    )
+                    <h1>
+                    YouTube Authorization Failed
+                    </h1>
 
-                    self.send_header(
-                        "Content-Type",
-                        "video/mp4"
-                    )
+                    <p>
+                    {error}
+                    </p>
 
-                    self.send_header(
-                        "Content-Length",
-                        str(len(data))
-                    )
+                    </body>
 
-                    self.end_headers()
+                    </html>
+                    """,
+                    400
+                )
 
-                    self.wfile.write(
-                        data
-                    )
+                return
 
-                    return
+            code = query.get(
+                "code",
+                [None]
+            )[0]
 
-                except Exception:
+            returned_state = query.get(
+                "state",
+                [None]
+            )[0]
 
-                    pass
+            if not code:
 
-        self.send_response(
+                self.send_html(
+                    """
+                    <html>
+
+                    <body>
+
+                    <h1>
+                    Authorization Error
+                    </h1>
+
+                    <p>
+                    No authorization code received.
+                    </p>
+
+                    </body>
+
+                    </html>
+                    """,
+                    400
+                )
+
+                return
+
+            saved_state = (
+                load_oauth_state()
+            )
+
+            if not saved_state:
+
+                self.send_html(
+                    """
+                    <html>
+
+                    <body>
+
+                    <h1>
+                    OAuth State Missing
+                    </h1>
+
+                    <p>
+                    Please start authorization again.
+                    </p>
+
+                    </body>
+
+                    </html>
+                    """,
+                    400
+                )
+
+                return
+
+            if returned_state != saved_state:
+
+                self.send_html(
+                    """
+                    <html>
+
+                    <body>
+
+                    <h1>
+                    OAuth State Mismatch
+                    </h1>
+
+                    <p>
+                    Please start authorization again.
+                    </p>
+
+                    </body>
+
+                    </html>
+                    """,
+                    400
+                )
+
+                return
+
+            code_verifier = (
+                load_code_verifier()
+            )
+
+            if not code_verifier:
+
+                self.send_html(
+                    """
+                    <html>
+
+                    <body>
+
+                    <h1>
+                    OAuth Code Verifier Missing
+                    </h1>
+
+                    <p>
+                    Please start authorization again.
+                    </p>
+
+                    </body>
+
+                    </html>
+                    """,
+                    400
+                )
+
+                return
+
+            try:
+
+                flow = create_oauth_flow(
+                    code_verifier=code_verifier
+                )
+
+                flow.fetch_token(
+                    code=code
+                )
+
+                credentials = (
+                    flow.credentials
+                )
+
+                save_credentials(
+                    credentials
+                )
+
+                clear_oauth_data()
+
+                self.send_html(
+                    """
+                    <html>
+
+                    <head>
+                    <title>YouTube Connected</title>
+                    </head>
+
+                    <body>
+
+                    <h1>
+                    ✅ YouTube Connected Successfully
+                    </h1>
+
+                    <p>
+                    Your YouTube authorization was successful.
+                    </p>
+
+                    <p>
+                    The token is stored in persistent Railway
+                    storage.
+                    </p>
+
+                    <p>
+                    You can close this page.
+                    </p>
+
+                    </body>
+
+                    </html>
+                    """
+                )
+
+            except Exception as e:
+
+                print(
+                    "\n===== YOUTUBE OAUTH ERROR =====",
+                    flush=True
+                )
+
+                print(
+                    str(e),
+                    flush=True
+                )
+
+                self.send_html(
+                    f"""
+                    <html>
+
+                    <body>
+
+                    <h1>
+                    YouTube OAuth Error
+                    </h1>
+
+                    <pre>{e}</pre>
+
+                    </body>
+
+                    </html>
+                    """,
+                    500
+                )
+
+            return
+
+        # ====================================================
+        # MANUAL TEST
+        # ====================================================
+
+        if path == "/run-test":
+
+            if not youtube_connected():
+
+                self.send_html(
+                    """
+                    <html>
+
+                    <body>
+
+                    <h1>
+                    YouTube not connected
+                    </h1>
+
+                    </body>
+
+                    </html>
+                    """,
+                    400
+                )
+
+                return
+
+            threading.Thread(
+                target=create_and_upload_short,
+                args=("MANUAL TEST",),
+                daemon=True
+            ).start()
+
+            self.send_html(
+                """
+                <html>
+
+                <body>
+
+                <h1>
+                Test started
+                </h1>
+
+                <p>
+                Check Railway logs for progress.
+                </p>
+
+                </body>
+
+                </html>
+                """
+            )
+
+            return
+
+        # ====================================================
+        # 404
+        # ====================================================
+
+        self.send_html(
+            """
+            <html>
+
+            <body>
+
+            <h1>
+            404
+            </h1>
+
+            </body>
+
+            </html>
+            """,
             404
         )
 
-        self.end_headers()
 
+# ============================================================
+# START SERVER
+# ============================================================
 
-def start_video_server():
+def start_server():
 
     port = int(
         os.getenv(
@@ -234,7 +882,7 @@ def start_video_server():
             "0.0.0.0",
             port
         ),
-        VideoHandler
+        AutomationHandler
     )
 
     print(
@@ -242,59 +890,16 @@ def start_video_server():
         flush=True
     )
 
+    print(
+        f"OAuth callback: {REDIRECT_URI}",
+        flush=True
+    )
+
     server.serve_forever()
 
 
 # ============================================================
-# IST TIME
-# ============================================================
-
-def get_ist_now():
-
-    now = datetime.now(
-        timezone.utc
-    )
-
-    return now.astimezone(
-        timezone(
-            datetime.now().astimezone().utcoffset()
-        )
-    )
-
-
-# ============================================================
-# BETTER IST CALCULATION
-# ============================================================
-
-def current_ist():
-
-    from datetime import timedelta
-
-    return datetime.now(
-        timezone.utc
-    ) + timedelta(
-        seconds=IST_OFFSET_SECONDS
-    )
-
-
-# ============================================================
-# CHECK YOUTUBE TOKEN
-# ============================================================
-
-def youtube_connected():
-
-    token_file = os.path.join(
-        DATA_DIR,
-        "youtube_token.json"
-    )
-
-    return os.path.exists(
-        token_file
-    )
-
-
-# ============================================================
-# GENERATE ONE SHORT
+# CREATE ONE SHORT
 # ============================================================
 
 def create_and_upload_short(
@@ -307,7 +912,7 @@ def create_and_upload_short(
     )
 
     print(
-        f"CREATING SHORT — {slot_name}",
+        f"CREATING SHORT: {slot_name}",
         flush=True
     )
 
@@ -323,14 +928,38 @@ def create_and_upload_short(
         )
 
     # --------------------------------------------------------
-    # CONTENT
+    # NEW CONTENT
     # --------------------------------------------------------
 
     content = generate_content()
 
-    title = content["title"]
+    title = content[
+        "title"
+    ]
 
-    script = content["script"]
+    script = content[
+        "script"
+    ]
+
+    print(
+        "\n===== NEW TITLE =====",
+        flush=True
+    )
+
+    print(
+        title,
+        flush=True
+    )
+
+    print(
+        "\n===== NEW SCRIPT =====",
+        flush=True
+    )
+
+    print(
+        script,
+        flush=True
+    )
 
     # --------------------------------------------------------
     # CTA
@@ -349,11 +978,11 @@ def create_and_upload_short(
     )
 
     # --------------------------------------------------------
-    # UNIQUE FILE NAMES
+    # FILE NAMES
     # --------------------------------------------------------
 
     timestamp = datetime.now(
-        timezone.utc
+        TIMEZONE
     ).strftime(
         "%Y%m%d_%H%M%S"
     )
@@ -371,7 +1000,7 @@ def create_and_upload_short(
     # --------------------------------------------------------
 
     print(
-        "\n[1/3] Generating ElevenLabs voice...",
+        "\n[1/3] ElevenLabs voice...",
         flush=True
     )
 
@@ -381,27 +1010,37 @@ def create_and_upload_short(
         voice_filename
     )
 
+    print(
+        f"Voice: {voice_path}",
+        flush=True
+    )
+
     # --------------------------------------------------------
     # VIDEO
     # --------------------------------------------------------
 
     print(
-        "\n[2/3] Generating 4K Short...",
+        "\n[2/3] Creating 4K Short...",
         flush=True
     )
 
-    # Use a random test amount only if video.py
-    # still expects the short_amount argument.
-    short_amount = random.randint(
-        1000,
-        2000
-    )
+    # Current video.py requires short_amount.
+    # IMPORTANT:
+    # Change the production opening in video.py before
+    # publishing automated videos so it does not claim
+    # fabricated daily earnings.
+    short_amount = 0
 
     video_path = generate_video(
         full_script,
         voice_path,
         video_filename,
         short_amount
+    )
+
+    print(
+        f"Video: {video_path}",
+        flush=True
     )
 
     # --------------------------------------------------------
@@ -420,7 +1059,17 @@ def create_and_upload_short(
     )
 
     print(
-        "\n===== SHORT COMPLETE =====",
+        "\n" + "=" * 70,
+        flush=True
+    )
+
+    print(
+        "SHORT UPLOAD COMPLETE",
+        flush=True
+    )
+
+    print(
+        "=" * 70,
         flush=True
     )
 
@@ -430,17 +1079,22 @@ def create_and_upload_short(
     )
 
     print(
-        f"YouTube URL: {result['url']}",
+        f"Video ID: {result['video_id']}",
         flush=True
     )
 
     print(
-        f"Related Video to add: {RELATED_VIDEO_URL}",
+        f"URL: {result['url']}",
         flush=True
     )
 
     print(
-        "==========================",
+        f"Related Video: {RELATED_VIDEO_URL}",
+        flush=True
+    )
+
+    print(
+        "=" * 70,
         flush=True
     )
 
@@ -448,21 +1102,20 @@ def create_and_upload_short(
 
 
 # ============================================================
-# SCHEDULER
+# DAILY SCHEDULER
 # ============================================================
 
-last_morning_date = None
-
-last_evening_date = None
+last_10am_date = None
+last_6pm_date = None
 
 
 def scheduler_loop():
 
-    global last_morning_date
-    global last_evening_date
+    global last_10am_date
+    global last_6pm_date
 
     print(
-        "\n===== DAILY SCHEDULER STARTED =====",
+        "\n===== DAILY SCHEDULER =====",
         flush=True
     )
 
@@ -480,9 +1133,11 @@ def scheduler_loop():
 
         try:
 
-            now = current_ist()
+            now = datetime.now(
+                TIMEZONE
+            )
 
-            current_date = (
+            today = (
                 now.strftime(
                     "%Y-%m-%d"
                 )
@@ -494,24 +1149,21 @@ def scheduler_loop():
                 )
             )
 
-            print(
-                f"[SCHEDULER] IST: "
-                f"{now.strftime('%Y-%m-%d %H:%M:%S')}",
-                flush=True
-            )
-
             # ------------------------------------------------
-            # 10:00 AM
+            # 10 AM
             # ------------------------------------------------
 
             if (
                 current_time == "10:00"
                 and
-                last_morning_date != current_date
+                last_10am_date != today
             ):
 
-                last_morning_date = (
-                    current_date
+                last_10am_date = today
+
+                print(
+                    "\n10:00 AM trigger detected.",
+                    flush=True
                 )
 
                 try:
@@ -523,7 +1175,7 @@ def scheduler_loop():
                 except Exception as e:
 
                     print(
-                        "\n10 AM SHORT FAILED:",
+                        "\n10 AM ERROR:",
                         flush=True
                     )
 
@@ -533,17 +1185,20 @@ def scheduler_loop():
                     )
 
             # ------------------------------------------------
-            # 6:00 PM
+            # 6 PM
             # ------------------------------------------------
 
             if (
                 current_time == "18:00"
                 and
-                last_evening_date != current_date
+                last_6pm_date != today
             ):
 
-                last_evening_date = (
-                    current_date
+                last_6pm_date = today
+
+                print(
+                    "\n6:00 PM trigger detected.",
+                    flush=True
                 )
 
                 try:
@@ -555,7 +1210,7 @@ def scheduler_loop():
                 except Exception as e:
 
                     print(
-                        "\n6 PM SHORT FAILED:",
+                        "\n6 PM ERROR:",
                         flush=True
                     )
 
@@ -571,7 +1226,8 @@ def scheduler_loop():
                 flush=True
             )
 
-        # Check every 20 seconds
+        # Check frequently enough to catch
+        # the scheduled minute.
         time.sleep(
             20
         )
@@ -608,47 +1264,67 @@ def main():
         flush=True
     )
 
-    if not os.getenv(
+    # --------------------------------------------------------
+    # ENVIRONMENT CHECK
+    # --------------------------------------------------------
+
+    if os.getenv(
         "ELEVENLABS_API_KEY"
     ):
 
         print(
-            "WARNING: ELEVENLABS_API_KEY missing.",
+            "✅ ElevenLabs API key detected.",
             flush=True
         )
 
     else:
 
         print(
-            "ElevenLabs API key detected.",
+            "❌ ELEVENLABS_API_KEY missing.",
             flush=True
         )
 
-    if not youtube_connected():
+    if os.getenv(
+        "GEMINI_API_KEY"
+    ):
 
         print(
-            "\nWARNING: YouTube is NOT connected.",
-            flush=True
-        )
-
-        print(
-            "Open /authorize after adding the OAuth route.",
+            "✅ Gemini API key detected.",
             flush=True
         )
 
     else:
 
         print(
-            "\nYouTube authorization detected.",
+            "⚠️ GEMINI_API_KEY missing.",
             flush=True
         )
+
+    if youtube_connected():
+
+        print(
+            "✅ YouTube OAuth token detected.",
+            flush=True
+        )
+
+    else:
+
+        print(
+            "❌ YouTube OAuth token missing.",
+            flush=True
+        )
+
+    print(
+        f"Related Video: {RELATED_VIDEO_URL}",
+        flush=True
+    )
 
     # --------------------------------------------------------
     # SERVER
     # --------------------------------------------------------
 
     server_thread = threading.Thread(
-        target=start_video_server,
+        target=start_server,
         daemon=True
     )
 
@@ -671,9 +1347,13 @@ def main():
 
     while True:
 
+        now = datetime.now(
+            TIMEZONE
+        )
+
         print(
             f"[HEARTBEAT] "
-            f"{current_ist().strftime('%Y-%m-%d %H:%M:%S')} IST",
+            f"{now.strftime('%Y-%m-%d %H:%M:%S')} IST",
             flush=True
         )
 
@@ -681,6 +1361,10 @@ def main():
             300
         )
 
+
+# ============================================================
+# START
+# ============================================================
 
 if __name__ == "__main__":
 
