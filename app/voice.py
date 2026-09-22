@@ -1,37 +1,30 @@
 import os
-import wave
-import subprocess
+import base64
+import json
+import requests
 
-from piper import PiperVoice
 
+OUTPUT_DIR = "/app/output"
 
-VOICE_NAME = "en_US-lessac-medium"
-
-BASE_DIR = os.path.dirname(
-    os.path.dirname(
-        os.path.abspath(__file__)
-    )
+ELEVENLABS_API_URL = (
+    "https://api.elevenlabs.io/v1/text-to-speech"
 )
 
-VOICE_DIR = os.path.join(
-    BASE_DIR,
-    "voices"
+VOICE_ID = os.getenv(
+    "ELEVENLABS_VOICE_ID",
+    "JBFqnCBsd6RMkjVDRZzb"
 )
 
-OUTPUT_DIR = os.path.join(
-    BASE_DIR,
-    "output"
-)
-
-MODEL_PATH = os.path.join(
-    VOICE_DIR,
-    f"{VOICE_NAME}.onnx"
+MODEL_ID = os.getenv(
+    "ELEVENLABS_MODEL_ID",
+    "eleven_multilingual_v2"
 )
 
 
 def generate_voice(
     text: str,
-    output_filename: str = "voice.wav"
+    cta_text: str = "",
+    output_filename: str = "voice.mp3"
 ) -> str:
 
     if not text:
@@ -39,33 +32,18 @@ def generate_voice(
             "Voice text cannot be empty."
         )
 
-    os.makedirs(
-        VOICE_DIR,
-        exist_ok=True
+    api_key = os.getenv(
+        "ELEVENLABS_API_KEY"
     )
 
-    os.makedirs(
-        OUTPUT_DIR,
-        exist_ok=True
-    )
-
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(
-            f"Piper voice model not found: {MODEL_PATH}"
+    if not api_key:
+        raise RuntimeError(
+            "ELEVENLABS_API_KEY is not configured."
         )
 
-    print(
-        "Loading Piper male voice...",
-        flush=True
-    )
-
-    voice = PiperVoice.load(
-        MODEL_PATH
-    )
-
-    raw_output = os.path.join(
+    os.makedirs(
         OUTPUT_DIR,
-        "raw_voice.wav"
+        exist_ok=True
     )
 
     output_path = os.path.join(
@@ -73,105 +51,232 @@ def generate_voice(
         output_filename
     )
 
+    metadata_path = os.path.splitext(
+        output_path
+    )[0] + ".json"
+
+    url = (
+        f"{ELEVENLABS_API_URL}/"
+        f"{VOICE_ID}/with-timestamps"
+    )
+
+    params = {
+        "output_format": "mp3_44100_128"
+    }
+
+    headers = {
+        "xi-api-key": api_key,
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "text": text,
+        "model_id": MODEL_ID,
+
+        "voice_settings": {
+            "stability": 0.50,
+            "similarity_boost": 0.85,
+            "style": 0.10,
+            "use_speaker_boost": True,
+            "speed": 0.92
+        }
+    }
+
     print(
-        "Generating natural male voice...",
+        "Generating ElevenLabs professional male voice...",
         flush=True
     )
 
-    with wave.open(
-        raw_output,
-        "wb"
-    ) as wav_file:
+    print(
+        f"Voice ID: {VOICE_ID}",
+        flush=True
+    )
 
-        voice.synthesize_wav(
-            text,
-            wav_file
+    print(
+        f"Model: {MODEL_ID}",
+        flush=True
+    )
+
+    try:
+
+        response = requests.post(
+            url,
+            params=params,
+            headers=headers,
+            json=payload,
+            timeout=180
         )
 
-    # ---------------------------------------------------------
-    # PROFESSIONAL VOICE PROCESSING
-    #
-    # 1. Slightly lower pitch
-    # 2. Slow the voice naturally
-    # 3. Remove unnecessary low rumble
-    # 4. Add controlled low-mid warmth
-    # 5. Improve vocal clarity
-    # 6. Compress the voice
-    # 7. Dynamically normalize volume
-    # 8. Final loudness normalization
-    # ---------------------------------------------------------
+    except requests.RequestException as e:
 
-    audio_filter = (
-        "asetrate=22050*0.96,"
-        "aresample=44100,"
-        "atempo=0.94,"
-        "highpass=f=70,"
-        "equalizer=f=120:t=q:w=0.9:g=2,"
-        "equalizer=f=250:t=q:w=1.0:g=1.5,"
-        "equalizer=f=3200:t=q:w=1.0:g=2,"
-        "equalizer=f=6500:t=q:w=1.0:g=-1,"
-        "acompressor="
-        "threshold=-18dB:"
-        "ratio=2.5:"
-        "attack=8:"
-        "release=100:"
-        "makeup=2,"
-        "dynaudnorm="
-        "f=150:"
-        "g=7:"
-        "p=0.92,"
-        "loudnorm="
-        "I=-14:"
-        "LRA=7:"
-        "TP=-1.5"
-    )
+        raise RuntimeError(
+            f"ElevenLabs connection failed: {e}"
+        )
 
-    command = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        raw_output,
-        "-af",
-        audio_filter,
-        "-ar",
-        "44100",
-        "-ac",
-        "1",
-        "-c:a",
-        "pcm_s16le",
-        output_path,
-    ]
-
-    print(
-        "Applying professional voice enhancement...",
-        flush=True
-    )
-
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True
-    )
-
-    if result.returncode != 0:
+    if response.status_code != 200:
 
         print(
-            result.stderr,
+            "===== ELEVENLABS ERROR =====",
+            flush=True
+        )
+
+        print(
+            response.text,
             flush=True
         )
 
         raise RuntimeError(
-            "FFmpeg voice enhancement failed."
+            f"ElevenLabs API returned "
+            f"HTTP {response.status_code}"
         )
 
-    if not os.path.exists(output_path):
+    try:
+
+        data = response.json()
+
+    except Exception:
 
         raise RuntimeError(
-            "Enhanced voice was not created."
+            "ElevenLabs returned invalid JSON."
+        )
+
+    if "audio_base64" not in data:
+
+        raise RuntimeError(
+            "ElevenLabs response did not "
+            "contain audio."
+        )
+
+    # ---------------------------------------------------------
+    # SAVE AUDIO
+    # ---------------------------------------------------------
+
+    try:
+
+        audio_data = base64.b64decode(
+            data["audio_base64"]
+        )
+
+    except Exception as e:
+
+        raise RuntimeError(
+            f"Could not decode ElevenLabs audio: {e}"
+        )
+
+    with open(
+        output_path,
+        "wb"
+    ) as audio_file:
+
+        audio_file.write(
+            audio_data
         )
 
     print(
-        f"Enhanced voice created: {output_path}",
+        f"ElevenLabs audio created: "
+        f"{output_path}",
+        flush=True
+    )
+
+    # ---------------------------------------------------------
+    # CTA TIMING
+    #
+    # ElevenLabs returns character-level timestamps.
+    # We use them to determine exactly when the CTA begins.
+    # ---------------------------------------------------------
+
+    cta_start = None
+    cta_end = None
+
+    alignment = data.get(
+        "alignment"
+    )
+
+    if alignment and cta_text:
+
+        characters = alignment.get(
+            "characters",
+            []
+        )
+
+        start_times = alignment.get(
+            "character_start_times_seconds",
+            []
+        )
+
+        end_times = alignment.get(
+            "character_end_times_seconds",
+            []
+        )
+
+        cta_index = text.find(
+            cta_text
+        )
+
+        if (
+            cta_index >= 0
+            and len(characters)
+            == len(start_times)
+            == len(end_times)
+        ):
+
+            start_index = cta_index
+
+            end_index = (
+                cta_index
+                + len(cta_text)
+                - 1
+            )
+
+            if end_index < len(
+                start_times
+            ):
+
+                cta_start = float(
+                    start_times[start_index]
+                )
+
+                cta_end = float(
+                    end_times[end_index]
+                )
+
+    # ---------------------------------------------------------
+    # SAVE TIMING METADATA
+    # ---------------------------------------------------------
+
+    metadata = {
+        "voice_id": VOICE_ID,
+        "model_id": MODEL_ID,
+        "text": text,
+        "cta_text": cta_text,
+        "cta_start": cta_start,
+        "cta_end": cta_end
+    }
+
+    with open(
+        metadata_path,
+        "w",
+        encoding="utf-8"
+    ) as metadata_file:
+
+        json.dump(
+            metadata,
+            metadata_file,
+            indent=2
+        )
+
+    print(
+        f"CTA start: {cta_start}",
+        flush=True
+    )
+
+    print(
+        f"CTA end: {cta_end}",
+        flush=True
+    )
+
+    print(
+        "ElevenLabs voice generation complete.",
         flush=True
     )
 
