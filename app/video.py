@@ -45,9 +45,7 @@ OPENING_TEXT_DURATION = 3.0
 # GET MEDIA DURATION
 # ============================================================
 
-def get_media_duration(
-    file_path: str
-) -> float:
+def get_media_duration(file_path: str) -> float:
 
     command = [
         "ffprobe",
@@ -69,8 +67,7 @@ def get_media_duration(
     if result.returncode != 0:
 
         raise RuntimeError(
-            f"Could not read media duration: "
-            f"{file_path}"
+            f"Could not read media duration: {file_path}"
         )
 
     data = json.loads(
@@ -86,17 +83,12 @@ def get_media_duration(
 # VALIDATE VIDEO
 # ============================================================
 
-def validate_video(
-    file_path: str
-):
+def validate_video(file_path: str):
 
-    if not os.path.exists(
-        file_path
-    ):
+    if not os.path.exists(file_path):
 
         raise FileNotFoundError(
-            f"Video not found: "
-            f"{file_path}"
+            f"Video not found: {file_path}"
         )
 
     duration = get_media_duration(
@@ -106,8 +98,7 @@ def validate_video(
     if duration <= 0:
 
         raise RuntimeError(
-            f"Invalid video: "
-            f"{file_path}"
+            f"Invalid video: {file_path}"
         )
 
     print(
@@ -149,9 +140,7 @@ def get_cta_timing(
     cta_start = None
     cta_end = None
 
-    if os.path.exists(
-        metadata_path
-    ):
+    if os.path.exists(metadata_path):
 
         try:
 
@@ -200,8 +189,7 @@ def get_cta_timing(
         except Exception as e:
 
             print(
-                f"Could not read timing metadata: "
-                f"{e}",
+                f"Could not read timing metadata: {e}",
                 flush=True
             )
 
@@ -578,7 +566,7 @@ def generate_video(
         )
 
     # ========================================================
-    # STEP 2 — 4K + OPENING TEXT + RED ANIMATED ARROW
+    # STEP 2 — 4K + TEXT + ANIMATED RED ARROW
     # ========================================================
 
     output_path = os.path.join(
@@ -595,8 +583,14 @@ def generate_video(
         )
 
     # ========================================================
-    # FINAL VIDEO FILTER
+    # IMPORTANT:
+    # The colon after "EXAMPLE" is escaped as \:
+    # so FFmpeg doesn't treat it as a filter separator.
     # ========================================================
+
+    opening_text = (
+        f"AI TRADING EXAMPLE\\: ${short_amount}"
+    )
 
     final_filter = (
 
@@ -624,7 +618,7 @@ def generate_video(
         "drawtext="
         "fontfile=/usr/share/fonts/truetype/"
         "dejavu/DejaVuSans-Bold.ttf:"
-        f"text='AI TRADING EXAMPLE: ${short_amount}':"
+        f"text='{opening_text}':"
         "fontcolor=#9CFF00:"
         "bordercolor=black:"
         "borderw=12:"
@@ -661,15 +655,6 @@ def generate_video(
 
         # ====================================================
         # RED ANIMATED ARROW
-        # ====================================================
-        #
-        # Arrow is now near the BOTTOM.
-        #
-        # It continuously moves up/down during the CTA.
-        #
-        # 2160x3840 video:
-        # Y around 3200 = lower portion of screen.
-        #
         # ====================================================
 
         "drawtext="
@@ -745,7 +730,7 @@ def generate_video(
     print(
         "\nStep 2/2: "
         "Upscaling to 4K + opening text "
-        "+ animated red CTA arrow...",
+        "+ animated red bottom arrow...",
         flush=True
     )
 
@@ -833,7 +818,7 @@ def generate_video(
     )
 
     # ========================================================
-    # REMOVE TEMPORARY FILE
+    # REMOVE TEMP FILE
     # ========================================================
 
     try:
