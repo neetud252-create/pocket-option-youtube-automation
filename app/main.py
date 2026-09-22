@@ -49,7 +49,7 @@ def main():
     print("=" * 60, flush=True)
 
     print(
-        "AI TRADING SHORTS - VIDEO TEST",
+        "AI TRADING SHORTS - ELEVENLABS TEST",
         flush=True
     )
 
@@ -60,9 +60,9 @@ def main():
         exist_ok=True
     )
 
-    # ---------------------------------------------------------
+    # --------------------------------------------------
     # START VIDEO SERVER
-    # ---------------------------------------------------------
+    # --------------------------------------------------
 
     server_thread = threading.Thread(
         target=start_video_server,
@@ -71,12 +71,50 @@ def main():
 
     server_thread.start()
 
-    # ---------------------------------------------------------
+    # --------------------------------------------------
+    # CHECK ELEVENLABS API KEY
+    # --------------------------------------------------
+
+    elevenlabs_key = os.getenv(
+        "ELEVENLABS_API_KEY"
+    )
+
+    if not elevenlabs_key:
+
+        print(
+            "\nERROR: ELEVENLABS_API_KEY is missing.",
+            flush=True
+        )
+
+        print(
+            "Add ELEVENLABS_API_KEY in Railway Variables.",
+            flush=True
+        )
+
+        while True:
+
+            print(
+                f"[HEARTBEAT] Waiting for configuration: "
+                f"{datetime.now(timezone.utc).isoformat()}",
+                flush=True
+            )
+
+            time.sleep(300)
+
+    print(
+        "\nElevenLabs API key detected.",
+        flush=True
+    )
+
+    # --------------------------------------------------
     # TEMPORARY TEST SCRIPT
+    # --------------------------------------------------
+    # Gemini is bypassed temporarily because the
+    # current Gemini free-tier quota is exhausted.
     #
-    # Gemini is bypassed temporarily because the current
-    # free-tier quota is exhausted.
-    # ---------------------------------------------------------
+    # We will connect Gemini again after the complete
+    # ElevenLabs + video pipeline is working.
+    # --------------------------------------------------
 
     bot_text = (
         "An AI trading bot can study candlestick patterns "
@@ -98,10 +136,6 @@ def main():
         + " "
         + cta_text
     )
-
-    # ---------------------------------------------------------
-    # PRINT SCRIPT
-    # ---------------------------------------------------------
 
     print(
         "\n===== BOT PART =====",
@@ -139,30 +173,65 @@ def main():
         flush=True
     )
 
+    # --------------------------------------------------
+    # GENERATE ELEVENLABS VOICE
+    # --------------------------------------------------
+
     try:
 
-        # -----------------------------------------------------
-        # 1. GENERATE ENHANCED PIPER VOICE
-        # -----------------------------------------------------
-
         print(
-            "\n[1/2] Generating enhanced Piper voice...",
+            "\n[1/2] Generating ElevenLabs voice...",
             flush=True
         )
 
         voice_path = generate_voice(
             full_script,
-            "test_voice.wav"
+            cta_text,
+            "test_voice.mp3"
         )
 
         print(
-            f"Voice created: {voice_path}",
+            f"Voice created successfully: {voice_path}",
             flush=True
         )
 
-        # -----------------------------------------------------
-        # 2. GENERATE 4K 5-CLIP VIDEO
-        # -----------------------------------------------------
+    except Exception as e:
+
+        print(
+            "\n" + "=" * 60,
+            flush=True
+        )
+
+        print(
+            "ELEVENLABS VOICE GENERATION FAILED",
+            flush=True
+        )
+
+        print(
+            "=" * 60,
+            flush=True
+        )
+
+        print(
+            f"Error: {e}",
+            flush=True
+        )
+
+        while True:
+
+            print(
+                f"[HEARTBEAT] Voice generation failed: "
+                f"{datetime.now(timezone.utc).isoformat()}",
+                flush=True
+            )
+
+            time.sleep(300)
+
+    # --------------------------------------------------
+    # GENERATE VIDEO
+    # --------------------------------------------------
+
+    try:
 
         print(
             "\n[2/2] Generating 4K 5-clip Short...",
@@ -196,7 +265,7 @@ def main():
         )
 
         print(
-            "Open /test_short_4k.mp4 on the Railway domain.",
+            "Open /test_short_4k.mp4 on your Railway domain.",
             flush=True
         )
 
@@ -208,7 +277,7 @@ def main():
         )
 
         print(
-            "VIDEO TEST FAILED",
+            "VIDEO GENERATION FAILED",
             flush=True
         )
 
@@ -222,9 +291,9 @@ def main():
             flush=True
         )
 
-    # ---------------------------------------------------------
-    # KEEP RAILWAY ALIVE
-    # ---------------------------------------------------------
+    # --------------------------------------------------
+    # KEEP RAILWAY SERVICE ALIVE
+    # --------------------------------------------------
 
     while True:
 
