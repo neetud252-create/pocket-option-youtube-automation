@@ -2,7 +2,9 @@ import os
 import random
 import threading
 import time
-from datetime import datetime
+import json
+
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, redirect, request
@@ -26,6 +28,8 @@ from app.video import (
 
 from app.youtube import (
     upload_short,
+    schedule_short,
+    get_video_status,
 )
 
 
@@ -80,6 +84,25 @@ SCOPES = [
 
 
 # ============================================================
+# BUFFER SETTINGS
+# ============================================================
+
+BUFFER_FILE = os.path.join(
+    DATA_DIR,
+    "buffer_queue.json"
+)
+
+BUFFER_LOCK = threading.Lock()
+
+BUFFER_TIMES = [
+    (10, 0),
+    (18, 0),
+]
+
+BUFFER_CHECK_SECONDS = 20
+
+
+# ============================================================
 # FLASK
 # ============================================================
 
@@ -102,7 +125,8 @@ def generate_demo_volume():
     )
 
     print(
-        f"Random test amount generated: ${amount}",
+        f"Random test amount generated: "
+        f"${amount}",
         flush=True
     )
 
@@ -110,11 +134,218 @@ def generate_demo_volume():
 
 
 # ============================================================
-# CREATE + UPLOAD
+# BUFFER FILE HELPERS
 # ============================================================
 
-def create_and_upload_short(
-    reason="SCHEDULED"
+def load_buffer():
+
+    if not os.path.exists(
+        BUFFER_FILE
+    ):
+
+        return {
+            "slots": []
+        }
+
+    try:
+
+        with open(
+            BUFFER_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            data = json.load(
+                file
+            )
+
+        if not isinstance(
+            data,
+            dict
+        ):
+
+            return {
+                "slots": []
+            }
+
+        if "slots" not in data:
+
+            data["slots"] = []
+
+        return data
+
+    except Exception as e:
+
+        print(
+            f"Buffer file read error: {e}",
+            flush=True
+        )
+
+        return {
+            "slots": []
+        }
+
+
+def save_buffer(
+    data
+):
+
+    os.makedirs(
+        DATA_DIR,
+        exist_ok=True
+    )
+
+    temp_file = (
+        BUFFER_FILE
+        + ".tmp"
+    )
+
+    with open(
+        temp_file,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            data,
+            file,
+            indent=2,
+            ensure_ascii=False
+        )
+
+    os.replace(
+        temp_file,
+        BUFFER_FILE
+    )
+
+
+# ============================================================
+# BUFFER CLEANUP
+# ============================================================
+
+def cleanup_old_buffer_slots(
+    data
+):
+
+    now = datetime.now(
+        TIMEZONE
+    )
+
+    cleaned = []
+
+    for slot in data.get(
+        "slots",
+        []
+    ):
+
+        publish_at_string = (
+            slot.get(
+                "publish_at"
+            )
+        )
+
+        if not publish_at_string:
+
+            continue
+
+        try:
+
+            publish_at = (
+                datetime.fromisoformat(
+                    publish_at_string
+                )
+            )
+
+        except Exception:
+
+            continue
+
+        # Keep current/future slots.
+        # Keep past slots for 24 hours so
+        # status information remains available.
+        if publish_at >= (
+            now - timedelta(hours=24)
+        ):
+
+            cleaned.append(
+                slot
+            )
+
+    data["slots"] = cleaned
+
+    return data
+
+
+# ============================================================
+# FIND BUFFER SLOT
+# ============================================================
+
+def find_slot(
+    data,
+    publish_at
+):
+
+    target = publish_at.isoformat()
+
+    for slot in data.get(
+        "slots",
+        []
+    ):
+
+        if (
+            slot.get(
+                "publish_at"
+            )
+            == target
+        ):
+
+            return slot
+
+    return None
+
+
+# ============================================================
+# TOMORROW'S SCHEDULE
+# ============================================================
+
+def get_tomorrow_slots():
+
+    now = datetime.now(
+        TIMEZONE
+    )
+
+    tomorrow = (
+        now.date()
+        + timedelta(days=1)
+    )
+
+    slots = []
+
+    for hour, minute in BUFFER_TIMES:
+
+        publish_at = datetime(
+            tomorrow.year,
+            tomorrow.month,
+            tomorrow.day,
+            hour,
+            minute,
+            tzinfo=TIMEZONE
+        )
+
+        slots.append(
+            publish_at
+        )
+
+    return slots
+
+
+# ============================================================
+# CREATE + SCHEDULE ONE SHORT
+# ============================================================
+
+def create_and_schedule_short(
+    publish_at,
+    reason="BUFFER"
 ):
 
     print(
@@ -123,7 +354,514 @@ def create_and_upload_short(
     )
 
     print(
-        "STARTING SHORT CREATION",
+        "STARTING BUFFER SHORT CREATION",
+        flush=True
+    )
+
+    print(
+        f"Reason: {reason}",
+        flush=True
+    )
+
+    print(
+        f"Target publish: "
+        f"{publish_at.isoformat()}",
+        flush=True
+    )
+
+    print(
+        "=" * 60,
+        flush=True
+    )
+
+    timestamp = int(
+        time.time()
+    )
+
+    try:
+
+        # ====================================================
+        # 1. CONTENT
+        # ====================================================
+
+        print(
+            "\n[1/5] Generating content...",
+            flush=True
+        )
+
+        content = generate_content()
+
+        title = content[
+            "title"
+        ]
+
+        script = content[
+            "script"
+        ]
+
+        print(
+            "\n===== GENERATED CONTENT =====",
+            flush=True
+        )
+
+        print(
+            f"Title: {title}",
+            flush=True
+        )
+
+        print(
+            f"Script: {script}",
+            flush=True
+        )
+
+        print(
+            "==============================",
+            flush=True
+        )
+
+
+        # ====================================================
+        # 2. CTA
+        # ====================================================
+
+        cta_text = (
+            "Go to my channel description "
+            "and click the Bot Activation button."
+        )
+
+        full_script = (
+            script.strip()
+            + " "
+            + cta_text
+        )
+
+        print(
+            "\nCTA:",
+            flush=True
+        )
+
+        print(
+            "Go to my channel description "
+            "and click the Bot Activation button.",
+            flush=True
+        )
+
+
+        # ====================================================
+        # 3. VOICE
+        # ====================================================
+
+        print(
+            "\n[2/5] Generating voice...",
+            flush=True
+        )
+
+        voice_path = os.path.join(
+            OUTPUT_DIR,
+            f"voice_{timestamp}.mp3"
+        )
+
+        generate_voice(
+            full_script,
+            cta_text,
+            voice_path
+        )
+
+        print(
+            f"Voice created: {voice_path}",
+            flush=True
+        )
+
+
+        # ====================================================
+        # 4. RANDOM AMOUNT
+        # ====================================================
+
+        short_amount = (
+            generate_demo_volume()
+        )
+
+
+        # ====================================================
+        # 5. VIDEO
+        # ====================================================
+
+        print(
+            "\n[3/5] Creating random-duration Short...",
+            flush=True
+        )
+
+        video_filename = (
+            f"short_{timestamp}.mp4"
+        )
+
+        video_path = generate_video(
+            script=script,
+            voice_path=voice_path,
+            output_filename=video_filename,
+            short_amount=short_amount
+        )
+
+        print(
+            f"Video created: {video_path}",
+            flush=True
+        )
+
+
+        # ====================================================
+        # 6. YOUTUBE SCHEDULE
+        # ====================================================
+
+        print(
+            "\n[4/5] Uploading and scheduling to YouTube...",
+            flush=True
+        )
+
+        upload_result = schedule_short(
+            video_path=video_path,
+            title=title,
+            description=YOUTUBE_DESCRIPTION,
+            publish_at=publish_at
+        )
+
+
+        # ====================================================
+        # 7. SAVE BUFFER RECORD
+        # ====================================================
+
+        print(
+            "\n[5/5] Saving buffer record...",
+            flush=True
+        )
+
+        return {
+            "title": title,
+            "script": script,
+            "video_path": video_path,
+            "video_id": upload_result[
+                "video_id"
+            ],
+            "url": upload_result[
+                "url"
+            ],
+            "publish_at": publish_at.isoformat(),
+            "privacy_status": "private",
+            "created_at": datetime.now(
+                TIMEZONE
+            ).isoformat(),
+            "status": "scheduled",
+        }
+
+    except Exception as e:
+
+        print(
+            "\n" + "=" * 60,
+            flush=True
+        )
+
+        print(
+            "BUFFER SHORT CREATION FAILED",
+            flush=True
+        )
+
+        print(
+            "=" * 60,
+            flush=True
+        )
+
+        print(
+            f"ERROR: "
+            f"{type(e).__name__}: {e}",
+            flush=True
+        )
+
+        print(
+            "=" * 60,
+            flush=True
+        )
+
+        raise
+
+
+# ============================================================
+# FILL TOMORROW'S BUFFER
+# ============================================================
+
+def fill_tomorrow_buffer():
+
+    with BUFFER_LOCK:
+
+        print(
+            "\n" + "=" * 60,
+            flush=True
+        )
+
+        print(
+            "CHECKING 1-DAY BUFFER",
+            flush=True
+        )
+
+        print(
+            "=" * 60,
+            flush=True
+        )
+
+        data = load_buffer()
+
+        data = cleanup_old_buffer_slots(
+            data
+        )
+
+        save_buffer(
+            data
+        )
+
+        tomorrow_slots = (
+            get_tomorrow_slots()
+        )
+
+        print(
+            "\nTomorrow requires:",
+            flush=True
+        )
+
+        for publish_at in tomorrow_slots:
+
+            print(
+                f"  - {publish_at.isoformat()}",
+                flush=True
+            )
+
+
+        # ====================================================
+        # PROCESS EACH SLOT
+        # ====================================================
+
+        for publish_at in tomorrow_slots:
+
+            existing = find_slot(
+                data,
+                publish_at
+            )
+
+            # ------------------------------------------------
+            # ALREADY SCHEDULED
+            # ------------------------------------------------
+
+            if existing:
+
+                print(
+                    "\nBUFFER SLOT ALREADY EXISTS",
+                    flush=True
+                )
+
+                print(
+                    f"Publish: "
+                    f"{publish_at.isoformat()}",
+                    flush=True
+                )
+
+                print(
+                    f"Video ID: "
+                    f"{existing.get('video_id')}",
+                    flush=True
+                )
+
+                print(
+                    f"Status: "
+                    f"{existing.get('status')}",
+                    flush=True
+                )
+
+                continue
+
+
+            # ------------------------------------------------
+            # CREATE NEW SHORT
+            # ------------------------------------------------
+
+            print(
+                "\nBUFFER SLOT EMPTY",
+                flush=True
+            )
+
+            print(
+                f"Creating Short for: "
+                f"{publish_at.isoformat()}",
+                flush=True
+            )
+
+            try:
+
+                result = (
+                    create_and_schedule_short(
+                        publish_at=publish_at,
+                        reason=(
+                            "1-DAY BUFFER"
+                        )
+                    )
+                )
+
+                data["slots"].append(
+                    result
+                )
+
+                save_buffer(
+                    data
+                )
+
+                print(
+                    "\nBUFFER SLOT CREATED",
+                    flush=True
+                )
+
+                print(
+                    f"Title: "
+                    f"{result['title']}",
+                    flush=True
+                )
+
+                print(
+                    f"Video ID: "
+                    f"{result['video_id']}",
+                    flush=True
+                )
+
+                print(
+                    f"Publish: "
+                    f"{result['publish_at']}",
+                    flush=True
+                )
+
+                print(
+                    "Status: SCHEDULED",
+                    flush=True
+                )
+
+            except Exception as e:
+
+                print(
+                    "\nBUFFER SLOT FAILED",
+                    flush=True
+                )
+
+                print(
+                    f"Target: "
+                    f"{publish_at.isoformat()}",
+                    flush=True
+                )
+
+                print(
+                    f"ERROR: "
+                    f"{type(e).__name__}: {e}",
+                    flush=True
+                )
+
+                # Continue to the second slot.
+                # This means if 10 AM fails, 6 PM
+                # can still be attempted.
+                continue
+
+
+        # ====================================================
+        # FINAL BUFFER STATUS
+        # ====================================================
+
+        data = load_buffer()
+
+        data = cleanup_old_buffer_slots(
+            data
+        )
+
+        save_buffer(
+            data
+        )
+
+        print(
+            "\n===== BUFFER CHECK COMPLETE =====",
+            flush=True
+        )
+
+        for publish_at in tomorrow_slots:
+
+            slot = find_slot(
+                data,
+                publish_at
+            )
+
+            if slot:
+
+                print(
+                    f"✅ {publish_at.strftime('%Y-%m-%d %I:%M %p')}"
+                    f" → {slot.get('status')}",
+                    flush=True
+                )
+
+            else:
+
+                print(
+                    f"❌ {publish_at.strftime('%Y-%m-%d %I:%M %p')}"
+                    f" → MISSING",
+                    flush=True
+                )
+
+        print(
+            "=================================",
+            flush=True
+        )
+
+
+# ============================================================
+# BUFFER BACKGROUND RUNNER
+# ============================================================
+
+def run_buffer_background(
+    reason="BUFFER CHECK"
+):
+
+    def worker():
+
+        try:
+
+            print(
+                f"\nStarting buffer background job: "
+                f"{reason}",
+                flush=True
+            )
+
+            fill_tomorrow_buffer()
+
+        except Exception as e:
+
+            print(
+                f"Background buffer failed: "
+                f"{type(e).__name__}: {e}",
+                flush=True
+            )
+
+    thread = threading.Thread(
+        target=worker,
+        daemon=True
+    )
+
+    thread.start()
+
+
+# ============================================================
+# MANUAL TEST SHORT
+# ============================================================
+
+def create_and_upload_short(
+    reason="MANUAL TEST"
+):
+
+    print(
+        "\n" + "=" * 60,
+        flush=True
+    )
+
+    print(
+        "STARTING MANUAL TEST SHORT CREATION",
         flush=True
     )
 
@@ -178,6 +916,7 @@ def create_and_upload_short(
             flush=True
         )
 
+
         # ====================================================
         # 2. CTA
         # ====================================================
@@ -203,6 +942,7 @@ def create_and_upload_short(
             "and click the Bot Activation button.",
             flush=True
         )
+
 
         # ====================================================
         # 3. VOICE
@@ -233,6 +973,7 @@ def create_and_upload_short(
             flush=True
         )
 
+
         # ====================================================
         # 4. RANDOM AMOUNT
         # ====================================================
@@ -240,6 +981,7 @@ def create_and_upload_short(
         short_amount = (
             generate_demo_volume()
         )
+
 
         # ====================================================
         # 5. VIDEO
@@ -266,8 +1008,9 @@ def create_and_upload_short(
             flush=True
         )
 
+
         # ====================================================
-        # 6. YOUTUBE UPLOAD
+        # 6. YOUTUBE TEST UPLOAD
         # ====================================================
 
         print(
@@ -280,6 +1023,7 @@ def create_and_upload_short(
             title=title,
             description=YOUTUBE_DESCRIPTION
         )
+
 
         # ====================================================
         # SUCCESS
@@ -296,7 +1040,7 @@ def create_and_upload_short(
         )
 
         print(
-            "SHORT CREATED SUCCESSFULLY",
+            "MANUAL TEST SHORT CREATED SUCCESSFULLY",
             flush=True
         )
 
@@ -311,7 +1055,8 @@ def create_and_upload_short(
         )
 
         print(
-            f"Video: {upload_result['url']}",
+            f"Video: "
+            f"{upload_result['url']}",
             flush=True
         )
 
@@ -351,7 +1096,7 @@ def create_and_upload_short(
         )
 
         print(
-            "SHORT CREATION FAILED",
+            "MANUAL TEST SHORT FAILED",
             flush=True
         )
 
@@ -375,7 +1120,7 @@ def create_and_upload_short(
 
 
 # ============================================================
-# BACKGROUND RUNNER
+# MANUAL TEST BACKGROUND
 # ============================================================
 
 def run_short_background(
@@ -415,22 +1160,36 @@ def home():
     return jsonify(
         {
             "status": "online",
+
             "service":
                 "Pocket Option YouTube Automation",
+
             "timezone":
                 "Asia/Kolkata",
+
             "schedule": [
-                "10:00 AM IST",
-                "06:00 PM IST"
+                "Tomorrow 10:00 AM IST",
+                "Tomorrow 06:00 PM IST"
             ],
-            "upload_privacy":
+
+            "buffer":
+                "1-day advance",
+
+            "automated_upload_privacy":
+                "private + scheduled",
+
+            "manual_test_privacy":
                 "unlisted",
+
             "short_duration":
                 "20-25 seconds",
+
             "normal_clips":
                 4,
+
             "cta_duration":
                 "6 seconds",
+
             "cta":
                 "Channel description → "
                 "Bot Activation button"
@@ -448,10 +1207,75 @@ def health():
     return jsonify(
         {
             "status": "healthy",
+
             "time":
                 datetime.now(
                     TIMEZONE
-                ).isoformat()
+                ).isoformat(),
+
+            "buffer":
+                "1-day advance"
+        }
+    )
+
+
+# ============================================================
+# BUFFER STATUS
+# ============================================================
+
+@app.route("/buffer")
+def buffer_status():
+
+    data = load_buffer()
+
+    data = cleanup_old_buffer_slots(
+        data
+    )
+
+    save_buffer(
+        data
+    )
+
+    return jsonify(
+        {
+            "status": "ok",
+
+            "timezone":
+                "Asia/Kolkata",
+
+            "tomorrow_slots":
+                get_tomorrow_slots(),
+
+            "buffer":
+                data
+        }
+    )
+
+
+# ============================================================
+# MANUALLY FILL BUFFER
+# ============================================================
+
+@app.route("/fill-buffer")
+def fill_buffer():
+
+    print(
+        "\nMANUAL BUFFER FILL REQUEST RECEIVED",
+        flush=True
+    )
+
+    run_buffer_background(
+        "MANUAL BUFFER FILL"
+    )
+
+    return jsonify(
+        {
+            "status":
+                "started",
+
+            "message":
+                "1-day buffer check started "
+                "in background."
         }
     )
 
@@ -476,8 +1300,11 @@ def run_test():
         {
             "status":
                 "started",
+
             "message":
-                "Short generation started in background.",
+                "Short generation started "
+                "in background.",
+
             "privacy":
                 "unlisted"
         }
@@ -513,6 +1340,7 @@ def authorize():
 
     client_config = {
         "web": {
+
             "client_id":
                 CLIENT_ID,
 
@@ -584,8 +1412,6 @@ def oauth2callback():
             "youtube_token.json"
         )
 
-        import json
-
         token_data = {
             "token":
                 credentials.token,
@@ -648,28 +1474,47 @@ def oauth2callback():
 
 
 # ============================================================
-# SCHEDULER
+# BUFFER SCHEDULER
 # ============================================================
 
 def scheduler_loop():
 
     print(
-        "\n===== SCHEDULER STARTED =====",
+        "\n===== 1-DAY BUFFER SCHEDULER STARTED =====",
         flush=True
     )
 
     print(
-        "Schedule: 10:00 AM IST",
+        "Buffer target:",
         flush=True
     )
 
     print(
-        "Schedule: 06:00 PM IST",
+        "Tomorrow 10:00 AM IST",
         flush=True
     )
 
-    last_run_date = None
-    last_run_hour = None
+    print(
+        "Tomorrow 06:00 PM IST",
+        flush=True
+    )
+
+    print(
+        "Scheduler check:",
+        f"every {BUFFER_CHECK_SECONDS} seconds",
+        flush=True
+    )
+
+    # --------------------------------------------------------
+    # FIRST CHECK
+    # --------------------------------------------------------
+
+    # This means when Railway starts/restarts,
+    # it immediately checks whether tomorrow's
+    # two videos already exist.
+    run_buffer_background(
+        "STARTUP BUFFER CHECK"
+    )
 
     while True:
 
@@ -679,80 +1524,34 @@ def scheduler_loop():
                 TIMEZONE
             )
 
-            current_date = (
-                now.date()
+            print(
+                f"\nBuffer heartbeat: "
+                f"{now.isoformat()}",
+                flush=True
             )
 
-            current_hour = (
-                now.hour
+            # ------------------------------------------------
+            # CHECK BUFFER
+            # ------------------------------------------------
+
+            run_buffer_background(
+                "AUTOMATIC BUFFER CHECK"
             )
-
-            current_minute = (
-                now.minute
-            )
-
-            should_run = (
-                current_hour in [10, 18]
-                and current_minute == 0
-            )
-
-            already_ran = (
-                last_run_date ==
-                current_date
-                and
-                last_run_hour ==
-                current_hour
-            )
-
-            if (
-                should_run
-                and
-                not already_ran
-            ):
-
-                if current_hour == 10:
-
-                    reason = (
-                        "SCHEDULED 10 AM IST"
-                    )
-
-                else:
-
-                    reason = (
-                        "SCHEDULED 6 PM IST"
-                    )
-
-                print(
-                    f"\nSCHEDULE TRIGGERED: "
-                    f"{reason}",
-                    flush=True
-                )
-
-                run_short_background(
-                    reason
-                )
-
-                last_run_date = (
-                    current_date
-                )
-
-                last_run_hour = (
-                    current_hour
-                )
 
             time.sleep(
-                20
+                BUFFER_CHECK_SECONDS
             )
 
         except Exception as e:
 
             print(
-                f"Scheduler error: {e}",
+                f"Buffer scheduler error: "
+                f"{type(e).__name__}: {e}",
                 flush=True
             )
 
             time.sleep(
-                20
+                BUFFER_CHECK_SECONDS
             )
 
 
