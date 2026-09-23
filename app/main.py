@@ -80,6 +80,14 @@ BUFFER_TIMES = [
 
 BUFFER_CHECK_SECONDS = 20
 
+# The automated 1-day buffer is filled once each day at/after
+# 11:00 PM IST. A persistent state file prevents a Railway
+# restart from creating the same day's buffer again.
+LAST_11PM_RUN_FILE = os.path.join(
+    DATA_DIR,
+    "last_11pm_buffer_run.json"
+)
+
 
 # ============================================================
 # OAUTH
@@ -997,47 +1005,243 @@ def youtube_monitor_loop():
 
 
 # ============================================================
+# 11 PM BUFFER STATE
+# ============================================================
+
+def load_last_11pm_run_date():
+
+    if not os.path.exists(
+        LAST_11PM_RUN_FILE
+    ):
+
+        return None
+
+    try:
+
+        with open(
+            LAST_11PM_RUN_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            data = json.load(
+                file
+            )
+
+        return data.get(
+            "date"
+        )
+
+    except Exception as e:
+
+        print(
+            f"11 PM state load error: {e}",
+            flush=True
+        )
+
+        return None
+
+
+def save_last_11pm_run_date(
+    run_date
+):
+
+    os.makedirs(
+        DATA_DIR,
+        exist_ok=True
+    )
+
+    temp_file = (
+        LAST_11PM_RUN_FILE
+        + ".tmp"
+    )
+
+    with open(
+        temp_file,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            {
+                "date": run_date,
+                "saved_at": iso_now()
+            },
+            file,
+            indent=2
+        )
+
+    os.replace(
+        temp_file,
+        LAST_11PM_RUN_FILE
+    )
+
+
+def tomorrow_buffer_is_complete():
+
+    data = load_buffer()
+
+    tomorrow_slots = (
+        get_tomorrow_slots()
+    )
+
+    for publish_at in tomorrow_slots:
+
+        if not find_slot(
+            data,
+            publish_at
+        ):
+
+            return False
+
+    return True
+
+
+# ============================================================
 # SCHEDULER
 # ============================================================
 
 def scheduler_loop():
 
     print(
-        "Buffer scheduler started.",
+        "11 PM buffer scheduler started.",
         flush=True
     )
 
-
-    # --------------------------------------------------------
-    # STARTUP CHECK
-    # --------------------------------------------------------
-
-    run_buffer_background(
-        "STARTUP BUFFER CHECK"
+    print(
+        "Automatic buffer creation time: "
+        "11:00 PM IST",
+        flush=True
     )
 
-
     # --------------------------------------------------------
-    # LOOP
+    # IMPORTANT:
+    # There is NO startup buffer fill here.
+    #
+    # The service waits until 11:00 PM IST.
+    # If Railway restarts after 11 PM, the scheduler will
+    # catch up automatically because it checks whether today's
+    # 11 PM run has already been completed.
     # --------------------------------------------------------
 
     while True:
 
         try:
 
-            if automation_is_enabled():
+            current_time = now_ist()
 
-                run_buffer_background(
-                    "AUTOMATIC BUFFER CHECK"
-                )
+            current_date = (
+                current_time.date()
+            )
 
-            else:
+            last_run_date = (
+                load_last_11pm_run_date()
+            )
+
+            after_11pm = (
+                current_time.hour >= 23
+            )
+
+            if not automation_is_enabled():
 
                 print(
                     "Scheduler: automation paused.",
                     flush=True
                 )
 
+            elif after_11pm:
+
+                current_date_string = (
+                    current_date.isoformat()
+                )
+
+                if last_run_date != current_date_string:
+
+                    print(
+                        "==================================================",
+                        flush=True
+                    )
+
+                    print(
+                        "11 PM IST BUFFER RUN STARTING",
+                        flush=True
+                    )
+
+                    print(
+                        f"Current IST time: "
+                        f"{current_time.isoformat()}",
+                        flush=True
+                    )
+
+                    print(
+                        "Creating tomorrow's "
+                        "10:00 AM and 6:00 PM Shorts.",
+                        flush=True
+                    )
+
+                    print(
+                        "==================================================",
+                        flush=True
+                    )
+
+                    # Run synchronously inside the scheduler
+                    # thread. This prevents multiple 11 PM
+                    # buffer-fill workers from being started at
+                    # the same time.
+                    #
+                    # fill_tomorrow_buffer() already checks each
+                    # exact publish time and skips slots that
+                    # already exist.
+
+                    fill_tomorrow_buffer()
+
+                    # Only mark today's 11 PM run complete when
+                    # BOTH tomorrow slots actually exist.
+                    #
+                    # If one video failed, the scheduler will
+                    # retry on the next 20-second check instead
+                    # of waiting another full day.
+
+                    if tomorrow_buffer_is_complete():
+
+                        save_last_11pm_run_date(
+                            current_date_string
+                        )
+
+                        print(
+                            "11 PM BUFFER RUN COMPLETE.",
+                            flush=True
+                        )
+
+                        print(
+                            "Tomorrow's 10:00 AM and "
+                            "6:00 PM slots are ready.",
+                            flush=True
+                        )
+
+                    else:
+
+                        print(
+                            "11 PM BUFFER RUN INCOMPLETE.",
+                            flush=True
+                        )
+
+                        print(
+                            "At least one tomorrow slot "
+                            "is missing. Scheduler will retry.",
+                            flush=True
+                        )
+
+                else:
+
+                    # Today's 11 PM run has already completed.
+                    # Do nothing until tomorrow at 11 PM.
+
+                    pass
+
+            # Before 11 PM, do absolutely nothing.
+            # This is what prevents the old continuous buffer
+            # generation behavior.
 
         except Exception as e:
 
@@ -1050,7 +1254,6 @@ def scheduler_loop():
             record_error(
                 e
             )
-
 
         time.sleep(
             BUFFER_CHECK_SECONDS
