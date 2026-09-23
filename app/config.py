@@ -1,32 +1,19 @@
 import os
 
 
-# ============================================================
-# RELATED VIDEO
-# ============================================================
-
-RELATED_VIDEO_URL = (
-    "https://youtu.be/9v6Q9zLWWsg"
-)
-
-
-# ============================================================
-# SAME DESCRIPTION FOR EVERY SHORT
-# ============================================================
-
 YOUTUBE_DESCRIPTION = """
-Pocket Option AI trading bot is one of the most powerful tools for automated trading in 2026. In this short video, I’ll show you how the AI bot works on Pocket Option in live trading, how it generates signals, and how traders can use AI-powered tools as part of a structured trading strategy.
+Pocket Option AI trading bot is one of the tools used to organize chart analysis and trading information. In this short video, I’ll show you how the AI bot works, how it analyzes market information, and how traders can use AI-powered tools as part of a structured trading workflow.
 
-Trading on Pocket Option can be challenging if you rely only on emotions or guesswork. That’s where an AI trading bot can help — it can analyze market information, identify patterns, and organize trading information in a structured way. Risk management remains important when using any trading strategy.
+Trading involves risk, and AI tools do not guarantee trading results. Always use proper risk management and understand the risks before trading.
 
 💡 Why use the Pocket Option AI bot?
 
-Removes emotional influence from trading decisions
 Provides structured trading information
-Saves time during market analysis
-Can be used alongside proper risk management
+Helps organize market analysis
+Saves time during chart analysis
+Can be used alongside a defined trading strategy
 
-In this short, you’ll see how the Pocket Option AI trading bot works and how AI can be used for chart analysis and trading workflows in 2026.
+In this short, you’ll see how the Pocket Option AI trading bot works and how AI can be used for chart analysis and trading workflows.
 
 👉 For more videos about Pocket Option, AI bots, and trading strategies, subscribe to the channel.
 
@@ -36,15 +23,7 @@ pocket option trading bot, pocket option ai trading bot, ai trading bot pocket o
 """.strip()
 
 
-# ============================================================
-# GEMINI
-# ============================================================
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-GEMINI_API_KEY = os.getenv(
-    "GEMINI_API_KEY"
-)
-
-GEMINI_MODEL = os.getenv(
-    "GEMINI_MODEL",
-    "gemini-2.5-flash"
-)
+# Current Gemini model
+GEMINI_MODEL = "gemini-3.6-flash"
