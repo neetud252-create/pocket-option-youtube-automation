@@ -8,11 +8,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 
 from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
 
 from app.config import (
     YOUTUBE_DESCRIPTION,
-    RELATED_VIDEO_URL,
     GEMINI_API_KEY,
     GEMINI_MODEL,
 )
@@ -41,11 +39,6 @@ DATA_DIR = "/app/data"
 TOKEN_FILE = os.path.join(
     DATA_DIR,
     "youtube_token.json"
-)
-
-CLIENT_SECRET_FILE = os.path.join(
-    DATA_DIR,
-    "client_secret.json"
 )
 
 SCOPES = [
@@ -133,7 +126,7 @@ def create_oauth_flow():
 
 
 # ============================================================
-# LOAD YOUTUBE TOKEN
+# YOUTUBE TOKEN CHECK
 # ============================================================
 
 def youtube_token_exists():
@@ -144,7 +137,7 @@ def youtube_token_exists():
 
 
 # ============================================================
-# CREATE SHORT
+# CREATE AND UPLOAD SHORT
 # ============================================================
 
 def create_and_upload_short(
@@ -209,12 +202,17 @@ def create_and_upload_short(
         )
 
         print(
-            "\nCTA:",
+            "\n===== CTA SCRIPT =====",
             flush=True
         )
 
         print(
             cta_text,
+            flush=True
+        )
+
+        print(
+            "======================",
             flush=True
         )
 
@@ -359,21 +357,6 @@ def create_and_upload_short(
 
         print(
             "====================================",
-            flush=True
-        )
-
-        print(
-            "\nRelated Video is NOT being used.",
-            flush=True
-        )
-
-        print(
-            "CTA directs viewers to the channel description.",
-            flush=True
-        )
-
-        print(
-            "Bot Activation button should be in the channel description.",
             flush=True
         )
 
@@ -1044,12 +1027,6 @@ def main():
 
     print(
         "CTA: Channel description -> Bot Activation button",
-        flush=True
-    )
-
-    print(
-        f"Legacy Related Video URL stored: "
-        f"{RELATED_VIDEO_URL}",
         flush=True
     )
 
