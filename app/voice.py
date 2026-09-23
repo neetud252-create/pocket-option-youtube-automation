@@ -4,6 +4,10 @@ import json
 import requests
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 OUTPUT_DIR = "/app/output"
 
 ELEVENLABS_API_URL = (
@@ -20,6 +24,10 @@ MODEL_ID = os.getenv(
     "eleven_multilingual_v2"
 )
 
+
+# ============================================================
+# GENERATE VOICE
+# ============================================================
 
 def generate_voice(
     text: str,
@@ -51,9 +59,91 @@ def generate_voice(
         output_filename
     )
 
-    metadata_path = os.path.splitext(
-        output_path
-    )[0] + ".json"
+    metadata_path = (
+        os.path.splitext(
+            output_path
+        )[0]
+        + ".json"
+    )
+
+    # ========================================================
+    # BUILD COMPLETE SPOKEN SCRIPT
+    # ========================================================
+
+    clean_text = text.strip()
+
+    clean_cta = (
+        cta_text.strip()
+        if cta_text
+        else ""
+    )
+
+    if clean_cta:
+
+        full_text = (
+            clean_text
+            + " "
+            + clean_cta
+        )
+
+    else:
+
+        full_text = clean_text
+
+    print(
+        "\n===== ELEVENLABS VOICE =====",
+        flush=True
+    )
+
+    print(
+        f"Voice ID: {VOICE_ID}",
+        flush=True
+    )
+
+    print(
+        f"Model: {MODEL_ID}",
+        flush=True
+    )
+
+    print(
+        "\nMain script:",
+        flush=True
+    )
+
+    print(
+        clean_text,
+        flush=True
+    )
+
+    print(
+        "\nCTA:",
+        flush=True
+    )
+
+    print(
+        clean_cta,
+        flush=True
+    )
+
+    print(
+        "\nFull spoken text:",
+        flush=True
+    )
+
+    print(
+        full_text,
+        flush=True
+    )
+
+    print(
+        "============================",
+        flush=True
+    )
+
+
+    # ========================================================
+    # ELEVENLABS API
+    # ========================================================
 
     url = (
         f"{ELEVENLABS_API_URL}/"
@@ -70,30 +160,32 @@ def generate_voice(
     }
 
     payload = {
-        "text": text,
+
+        "text": full_text,
+
         "model_id": MODEL_ID,
 
         "voice_settings": {
+
             "stability": 0.50,
+
             "similarity_boost": 0.85,
+
             "style": 0.10,
+
             "use_speaker_boost": True,
+
             "speed": 0.92
         }
     }
 
-    print(
-        "Generating ElevenLabs professional male voice...",
-        flush=True
-    )
+
+    # ========================================================
+    # REQUEST
+    # ========================================================
 
     print(
-        f"Voice ID: {VOICE_ID}",
-        flush=True
-    )
-
-    print(
-        f"Model: {MODEL_ID}",
+        "\nGenerating ElevenLabs voice...",
         flush=True
     )
 
@@ -113,10 +205,15 @@ def generate_voice(
             f"ElevenLabs connection failed: {e}"
         )
 
+
+    # ========================================================
+    # API ERROR
+    # ========================================================
+
     if response.status_code != 200:
 
         print(
-            "===== ELEVENLABS ERROR =====",
+            "\n===== ELEVENLABS ERROR =====",
             flush=True
         )
 
@@ -130,6 +227,11 @@ def generate_voice(
             f"HTTP {response.status_code}"
         )
 
+
+    # ========================================================
+    # JSON RESPONSE
+    # ========================================================
+
     try:
 
         data = response.json()
@@ -140,6 +242,11 @@ def generate_voice(
             "ElevenLabs returned invalid JSON."
         )
 
+
+    # ========================================================
+    # CHECK AUDIO
+    # ========================================================
+
     if "audio_base64" not in data:
 
         raise RuntimeError(
@@ -147,9 +254,10 @@ def generate_voice(
             "contain audio."
         )
 
-    # ---------------------------------------------------------
-    # SAVE AUDIO
-    # ---------------------------------------------------------
+
+    # ========================================================
+    # DECODE AUDIO
+    # ========================================================
 
     try:
 
@@ -160,8 +268,21 @@ def generate_voice(
     except Exception as e:
 
         raise RuntimeError(
-            f"Could not decode ElevenLabs audio: {e}"
+            f"Could not decode ElevenLabs "
+            f"audio: {e}"
         )
+
+
+    if not audio_data:
+
+        raise RuntimeError(
+            "ElevenLabs returned empty audio."
+        )
+
+
+    # ========================================================
+    # SAVE AUDIO
+    # ========================================================
 
     with open(
         output_path,
@@ -172,18 +293,53 @@ def generate_voice(
             audio_data
         )
 
+
+    if not os.path.exists(
+        output_path
+    ):
+
+        raise RuntimeError(
+            "Voice file was not created."
+        )
+
+
+    file_size = (
+        os.path.getsize(
+            output_path
+        )
+    )
+
+
+    if file_size <= 0:
+
+        raise RuntimeError(
+            "Voice file is empty."
+        )
+
+
     print(
-        f"ElevenLabs audio created: "
-        f"{output_path}",
+        f"\nElevenLabs audio created:",
         flush=True
     )
 
-    # ---------------------------------------------------------
+    print(
+        output_path,
+        flush=True
+    )
+
+    print(
+        f"Audio size: "
+        f"{file_size / 1024:.2f} KB",
+        flush=True
+    )
+
+
+    # ========================================================
     # CTA TIMING
     #
-    # ElevenLabs returns character-level timestamps.
-    # We use them to determine exactly when the CTA begins.
-    # ---------------------------------------------------------
+    # ElevenLabs returns character-level
+    # timestamps.
+    # ========================================================
 
     cta_start = None
     cta_end = None
@@ -192,7 +348,11 @@ def generate_voice(
         "alignment"
     )
 
-    if alignment and cta_text:
+
+    if (
+        alignment
+        and clean_cta
+    ):
 
         characters = alignment.get(
             "characters",
@@ -209,9 +369,14 @@ def generate_voice(
             []
         )
 
-        cta_index = text.find(
-            cta_text
+
+        # Find CTA inside the complete
+        # spoken text.
+
+        cta_index = full_text.find(
+            clean_cta
         )
+
 
         if (
             cta_index >= 0
@@ -224,34 +389,60 @@ def generate_voice(
 
             end_index = (
                 cta_index
-                + len(cta_text)
+                + len(clean_cta)
                 - 1
             )
 
-            if end_index < len(
-                start_times
+
+            if (
+                start_index
+                < len(start_times)
+                and
+                end_index
+                < len(end_times)
             ):
 
                 cta_start = float(
-                    start_times[start_index]
+                    start_times[
+                        start_index
+                    ]
                 )
 
                 cta_end = float(
-                    end_times[end_index]
+                    end_times[
+                        end_index
+                    ]
                 )
 
-    # ---------------------------------------------------------
-    # SAVE TIMING METADATA
-    # ---------------------------------------------------------
+
+    # ========================================================
+    # SAVE METADATA
+    # ========================================================
 
     metadata = {
-        "voice_id": VOICE_ID,
-        "model_id": MODEL_ID,
-        "text": text,
-        "cta_text": cta_text,
-        "cta_start": cta_start,
-        "cta_end": cta_end
+
+        "voice_id":
+            VOICE_ID,
+
+        "model_id":
+            MODEL_ID,
+
+        "main_text":
+            clean_text,
+
+        "cta_text":
+            clean_cta,
+
+        "full_text":
+            full_text,
+
+        "cta_start":
+            cta_start,
+
+        "cta_end":
+            cta_end
     }
+
 
     with open(
         metadata_path,
@@ -262,21 +453,26 @@ def generate_voice(
         json.dump(
             metadata,
             metadata_file,
-            indent=2
+            indent=2,
+            ensure_ascii=False
         )
 
+
     print(
-        f"CTA start: {cta_start}",
+        f"\nCTA start: "
+        f"{cta_start}",
         flush=True
     )
 
     print(
-        f"CTA end: {cta_end}",
+        f"CTA end: "
+        f"{cta_end}",
         flush=True
     )
 
     print(
-        "ElevenLabs voice generation complete.",
+        "\nElevenLabs voice generation "
+        "complete.",
         flush=True
     )
 
