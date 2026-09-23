@@ -1,19 +1,14 @@
 import os
 import json
 import random
-import re
 
 from google import genai
 
 from app.config import (
     GEMINI_API_KEY,
-    GEMINI_MODEL
+    GEMINI_MODEL,
 )
 
-
-# ============================================================
-# STORAGE
-# ============================================================
 
 DATA_DIR = "/app/data"
 
@@ -21,6 +16,80 @@ HISTORY_FILE = os.path.join(
     DATA_DIR,
     "content_history.json"
 )
+
+
+# ============================================================
+# FALLBACK CONTENT
+# ============================================================
+
+FALLBACK_CONTENT = [
+
+    {
+        "title": "Pocket Option AI Bot: How Does It Work?",
+        "script": (
+            "What happens when an AI trading bot studies "
+            "market information instead of relying only on guesswork? "
+            "It can organize chart data, identify patterns, "
+            "and help you follow a defined trading strategy."
+        )
+    },
+
+    {
+        "title": "Pocket Option AI Trading Bot Explained",
+        "script": (
+            "An AI trading bot can help organize market information "
+            "and analyze chart patterns in a structured way. "
+            "Instead of manually checking every detail, "
+            "the system can process information and present "
+            "it in a more organized trading workflow."
+        )
+    },
+
+    {
+        "title": "Pocket Option AI Bot: What Does It Analyze?",
+        "script": (
+            "How can an AI bot analyze a trading chart? "
+            "It can process market information, study patterns, "
+            "and organize signals into a structured workflow. "
+            "The goal is to make analysis more systematic "
+            "rather than relying entirely on emotions."
+        )
+    },
+
+    {
+        "title": "Pocket Option AI Trading Bot: Quick Breakdown",
+        "script": (
+            "Pocket Option AI trading bots can be used to organize "
+            "chart analysis and market information. "
+            "They can examine patterns and help structure "
+            "a trading workflow, while risk management "
+            "still remains an important part of trading."
+        )
+    },
+
+    {
+        "title": "Pocket Option AI Bot: How AI Helps Trading",
+        "script": (
+            "AI can process large amounts of market information "
+            "and organize it into a structured analysis. "
+            "A Pocket Option AI bot can use these tools "
+            "to help study charts and patterns while keeping "
+            "the trading process more systematic."
+        )
+    },
+
+    {
+        "title": "Pocket Option AI Trading Bot: See How It Works",
+        "script": (
+            "Instead of manually studying every chart detail, "
+            "an AI trading bot can help organize market data "
+            "and identify patterns. This can make the analysis "
+            "process more structured, although trading still "
+            "involves risk."
+        )
+    },
+
+]
 
 
 # ============================================================
@@ -37,11 +106,7 @@ def load_history():
     if not os.path.exists(
         HISTORY_FILE
     ):
-
-        return {
-            "scripts": [],
-            "titles": []
-        }
+        return []
 
     try:
 
@@ -51,53 +116,32 @@ def load_history():
             encoding="utf-8"
         ) as file:
 
-            data = json.load(
-                file
-            )
+            data = json.load(file)
 
-        return {
-            "scripts": data.get(
-                "scripts",
-                []
-            ),
-            "titles": data.get(
-                "titles",
-                []
-            )
-        }
+        if isinstance(data, list):
+            return data
+
+        return []
 
     except Exception as e:
 
         print(
-            f"History load error: {e}",
+            f"Could not load content history: {e}",
             flush=True
         )
 
-        return {
-            "scripts": [],
-            "titles": []
-        }
+        return []
 
 
 # ============================================================
 # SAVE HISTORY
 # ============================================================
 
-def save_history(
-    history
-):
+def save_history(history):
 
     os.makedirs(
         DATA_DIR,
         exist_ok=True
-    )
-
-    history["scripts"] = (
-        history["scripts"][-200:]
-    )
-
-    history["titles"] = (
-        history["titles"][-200:]
     )
 
     with open(
@@ -115,294 +159,270 @@ def save_history(
 
 
 # ============================================================
-# FALLBACK CONTENT
+# NORMALIZE TEXT
 # ============================================================
 
-FALLBACK_CONTENT = [
+def normalize_text(text):
 
-    (
-        "What happens when an AI trading bot studies "
-        "the market instead of relying only on guesswork? "
-        "It can organize chart information, identify "
-        "patterns, and help you follow a defined strategy. "
-        "Want to see the complete setup? Tap the Related "
-        "Video below the title.",
-        "Pocket Option AI Bot: How Does It Actually Work?"
-    ),
+    if not text:
+        return ""
 
-    (
-        "Reading a trading chart manually can take time. "
-        "An AI trading bot can analyze price movement "
-        "and organize the information into a clearer "
-        "trading setup. The important part is using signals "
-        "with proper risk management. See the full setup "
-        "in the Related Video.",
-        "Pocket Option AI Trading Bot Explained"
-    ),
-
-    (
-        "Can AI help organize a Pocket Option trading setup? "
-        "An AI bot can analyze chart data, look for patterns, "
-        "and present information in a structured way. "
-        "It does not remove trading risk, so risk management "
-        "still matters. Watch the Related Video for the "
-        "complete setup.",
-        "Pocket Option AI Bot Trading Setup"
-    ),
-
-    (
-        "Instead of watching every candle manually, an AI "
-        "trading system can help analyze price movement "
-        "and chart patterns in a structured process. "
-        "The goal is consistency, not guessing. "
-        "Tap the Related Video below the title to see "
-        "the complete bot setup.",
-        "Pocket Option AI Trading Bot: Complete Setup"
-    ),
-
-    (
-        "One interesting use of AI in trading is automated "
-        "chart analysis. The system can examine price "
-        "movement and patterns and organize the information "
-        "for a trader. Always consider risk before trading. "
-        "Watch the Related Video to see how the setup works.",
-        "Pocket Option AI Bot: AI Chart Analysis"
-    ),
-
-    (
-        "AI trading tools can help turn large amounts of "
-        "chart information into a more structured process. "
-        "A Pocket Option AI bot can analyze patterns and "
-        "price movement, while the trader still controls "
-        "risk and execution. Watch the Related Video for "
-        "the complete setup.",
-        "Pocket Option AI Trading Bot: Market Analysis"
-    ),
-
-    (
-        "Why are traders exploring AI for chart analysis? "
-        "An AI trading bot can process price movement and "
-        "patterns quickly and organize them into signals "
-        "or trading information. AI does not eliminate risk. "
-        "See the complete setup in the Related Video.",
-        "Pocket Option AI Bot: AI Market Analysis"
-    ),
-
-    (
-        "A trading bot is not just about automation. "
-        "It can also organize chart analysis into a repeatable "
-        "process. With a Pocket Option AI bot, market data "
-        "and patterns can be analyzed systematically. "
-        "Watch the Related Video to see the setup.",
-        "Pocket Option AI Trading Bot: How It Analyzes Charts"
-    ),
-
-    (
-        "Candlestick charts contain a lot of information. "
-        "An AI trading bot can help analyze price movement "
-        "and recognize patterns in a structured way. "
-        "Risk management is still essential when trading. "
-        "Tap the Related Video for the full tutorial.",
-        "Pocket Option AI Bot: Candlestick Analysis"
-    ),
-
-    (
-        "What can an AI trading bot actually analyze? "
-        "It can process chart data, price movement, and "
-        "technical patterns to organize information for "
-        "a trading setup. It cannot guarantee a result. "
-        "See the complete Pocket Option setup in the "
-        "Related Video.",
-        "Pocket Option AI Trading Bot: What It Analyzes"
+    return " ".join(
+        str(text)
+        .strip()
+        .split()
     )
 
-]
+
+# ============================================================
+# VALIDATE GENERATED CONTENT
+# ============================================================
+
+def validate_content(title, script):
+
+    title = normalize_text(title)
+    script = normalize_text(script)
+
+    if not title:
+        return False
+
+    if not script:
+        return False
+
+    # Required title wording
+    title_lower = title.lower()
+
+    if (
+        "pocket option ai bot" not in title_lower
+        and
+        "pocket option ai trading bot" not in title_lower
+    ):
+        return False
+
+    # Never allow unwanted CTA wording
+    forbidden_phrases = [
+        "related video",
+        "tap the related",
+        "click the related",
+        "below the title",
+        "link in bio",
+        "bot activation button",
+        "channel description",
+    ]
+
+    script_lower = script.lower()
+
+    for phrase in forbidden_phrases:
+
+        if phrase in script_lower:
+            return False
+
+    # Keep scripts short enough for Shorts
+    words = script.split()
+
+    if len(words) < 30:
+        return False
+
+    if len(words) > 60:
+        return False
+
+    return True
 
 
 # ============================================================
-# CLEAN GEMINI RESPONSE
+# FALLBACK
 # ============================================================
 
-def clean_response(
-    text
-):
+def get_fallback_content(history):
 
-    text = text.strip()
+    used_titles = {
+        item.get("title", "").strip().lower()
+        for item in history
+        if isinstance(item, dict)
+    }
 
-    text = text.replace(
-        "```json",
-        ""
+    available = [
+        item
+        for item in FALLBACK_CONTENT
+        if item["title"].strip().lower()
+        not in used_titles
+    ]
+
+    if not available:
+        available = FALLBACK_CONTENT
+
+    selected = random.choice(
+        available
     )
 
-    text = text.replace(
-        "```",
-        ""
-    )
-
-    return text.strip()
+    return {
+        "title": selected["title"],
+        "script": selected["script"]
+    }
 
 
 # ============================================================
-# GEMINI GENERATOR
+# GEMINI GENERATION
 # ============================================================
 
-def generate_with_gemini(
-    history
-):
+def generate_with_gemini(history):
 
     if not GEMINI_API_KEY:
 
-        print(
-            "GEMINI_API_KEY not configured.",
-            flush=True
+        raise RuntimeError(
+            "GEMINI_API_KEY is missing."
         )
 
-        return None
+    client = genai.Client(
+        api_key=GEMINI_API_KEY
+    )
+
+    recent_titles = []
+
+    for item in history[-20:]:
+
+        if isinstance(item, dict):
+
+            title = item.get(
+                "title"
+            )
+
+            if title:
+                recent_titles.append(
+                    title
+                )
+
+    previous_titles_text = "\n".join(
+        f"- {title}"
+        for title in recent_titles
+    )
+
+    prompt = f"""
+Create ONE YouTube Shorts script about the Pocket Option AI Bot.
+
+IMPORTANT RULES:
+
+1. The title MUST contain either:
+   "Pocket Option AI Bot"
+   OR
+   "Pocket Option AI Trading Bot"
+
+2. Script must be 30 to 55 words.
+
+3. Make the script educational and natural.
+
+4. Explain AI trading bot functionality, chart analysis,
+   market information, patterns, or structured trading workflows.
+
+5. Do NOT make guaranteed profit claims.
+
+6. Do NOT claim guaranteed accuracy.
+
+7. Do NOT mention earnings as guaranteed results.
+
+8. Do NOT include a CTA.
+
+9. Do NOT mention:
+   - Related Video
+   - video below the title
+   - link in bio
+   - channel description
+   - Bot Activation button
+
+10. Do NOT use emojis.
+
+11. Return ONLY valid JSON.
+
+Required JSON format:
+
+{{
+  "title": "Pocket Option AI Bot: Example Title",
+  "script": "30 to 55 word educational script here."
+}}
+
+Previously used titles:
+{previous_titles_text}
+"""
+
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt
+    )
+
+    text = response.text.strip()
+
+    # Remove markdown fences if Gemini adds them
+    if text.startswith("```"):
+
+        text = text.replace(
+            "```json",
+            ""
+        )
+
+        text = text.replace(
+            "```",
+            ""
+        )
+
+        text = text.strip()
+
+    data = json.loads(
+        text
+    )
+
+    title = data.get(
+        "title",
+        ""
+    )
+
+    script = data.get(
+        "script",
+        ""
+    )
+
+    if not validate_content(
+        title,
+        script
+    ):
+
+        raise RuntimeError(
+            "Gemini generated invalid content."
+        )
+
+    return {
+        "title": normalize_text(title),
+        "script": normalize_text(script)
+    }
+
+
+# ============================================================
+# MAIN CONTENT FUNCTION
+# ============================================================
+
+def generate_content():
+
+    history = load_history()
+
+    print(
+        "\n===== CONTENT GENERATION =====",
+        flush=True
+    )
+
+    print(
+        f"Model: {GEMINI_MODEL}",
+        flush=True
+    )
 
     try:
 
-        client = genai.Client(
-            api_key=GEMINI_API_KEY
+        result = generate_with_gemini(
+            history
         )
 
-        previous_titles = "\n".join(
-            history["titles"][-30:]
+        print(
+            "Gemini generation successful.",
+            flush=True
         )
-
-        previous_scripts = "\n".join(
-            history["scripts"][-20:]
-        )
-
-        prompt = f"""
-Create ONE completely original YouTube Shorts script
-about Pocket Option AI Bot or Pocket Option AI Trading Bot.
-
-This is for an educational short-form channel.
-
-IMPORTANT:
-- Make this script substantially different from all
-  previous scripts.
-- Do not reuse previous wording.
-- Use a different hook.
-- Use a different explanation angle.
-- Use different sentence structure.
-- Do not repeat previous titles.
-
-Do NOT:
-- guarantee profits
-- guarantee accurate signals
-- claim guaranteed winning trades
-- invent earnings
-- fabricate trading results
-- claim AI removes trading risk
-
-The script should be approximately 35-55 words.
-
-The script should contain:
-1. A strong curiosity-based opening.
-2. Useful information about the AI trading bot.
-3. A natural explanation.
-4. A short CTA to the full tutorial.
-
-The title MUST naturally contain one of these:
-- Pocket Option AI Bot
-- Pocket Option AI Trading Bot
-
-Return ONLY valid JSON:
-
-{{
-  "title": "unique title here",
-  "script": "unique script here"
-}}
-
-PREVIOUS TITLES:
-{previous_titles}
-
-PREVIOUS SCRIPTS:
-{previous_scripts}
-"""
-
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
-        )
-
-        raw = response.text
-
-        if not raw:
-
-            return None
-
-        raw = clean_response(
-            raw
-        )
-
-        data = json.loads(
-            raw
-        )
-
-        title = str(
-            data.get(
-                "title",
-                ""
-            )
-        ).strip()
-
-        script = str(
-            data.get(
-                "script",
-                ""
-            )
-        ).strip()
-
-        if not title:
-
-            return None
-
-        if not script:
-
-            return None
-
-        # ----------------------------------------------------
-        # CHECK TITLE
-        # ----------------------------------------------------
-
-        existing_titles = [
-            x.lower().strip()
-            for x in history["titles"]
-        ]
-
-        if title.lower().strip() in existing_titles:
-
-            print(
-                "Gemini returned a duplicate title.",
-                flush=True
-            )
-
-            return None
-
-        # ----------------------------------------------------
-        # CHECK SCRIPT
-        # ----------------------------------------------------
-
-        existing_scripts = [
-            x.lower().strip()
-            for x in history["scripts"]
-        ]
-
-        if script.lower().strip() in existing_scripts:
-
-            print(
-                "Gemini returned a duplicate script.",
-                flush=True
-            )
-
-            return None
-
-        return {
-            "title": title,
-            "script": script
-        }
 
     except Exception as e:
 
@@ -421,86 +441,47 @@ PREVIOUS SCRIPTS:
             flush=True
         )
 
-        return None
-
-
-# ============================================================
-# MAIN CONTENT GENERATOR
-# ============================================================
-
-def generate_content():
-
-    history = load_history()
+        result = get_fallback_content(
+            history
+        )
 
     # --------------------------------------------------------
-    # TRY GEMINI
+    # FINAL SAFETY CHECK
     # --------------------------------------------------------
 
-    generated = generate_with_gemini(
-        history
-    )
-
-    if generated:
-
-        title = generated[
-            "title"
-        ]
-
-        script = generated[
-            "script"
-        ]
+    if not validate_content(
+        result["title"],
+        result["script"]
+    ):
 
         print(
-            "\nUsing NEW Gemini-generated content.",
+            "Generated content failed validation.",
             flush=True
         )
 
-    else:
-
-        # ----------------------------------------------------
-        # FALLBACK
-        # ----------------------------------------------------
-
-        used_titles = [
-            x.lower().strip()
-            for x in history["titles"]
-        ]
-
-        available = [
-
-            item
-            for item in FALLBACK_CONTENT
-
-            if item[1].lower().strip()
-            not in used_titles
-        ]
-
-        if not available:
-
-            available = (
-                FALLBACK_CONTENT
-            )
-
-        script, title = random.choice(
-            available
+        print(
+            "Using fallback content.",
+            flush=True
         )
 
-        print(
-            "\nUsing unique fallback content.",
-            flush=True
+        result = get_fallback_content(
+            history
         )
 
     # --------------------------------------------------------
     # SAVE HISTORY
     # --------------------------------------------------------
 
-    history["scripts"].append(
-        script
+    history.append(
+        {
+            "title": result["title"],
+            "script": result["script"]
+        }
     )
 
-    history["titles"].append(
-        title
-    )
+    # Keep history manageable
+    if len(history) > 100:
+        history = history[-100:]
 
     save_history(
         history
@@ -526,18 +507,33 @@ def generate_content():
     )
 
     print(
-        f"TITLE:\n{title}",
+        f"Model: {GEMINI_MODEL}",
         flush=True
     )
 
     print(
-        f"\nSCRIPT:\n{script}",
+        "\nTITLE:",
+        flush=True
+    )
+
+    print(
+        result["title"],
+        flush=True
+    )
+
+    print(
+        "\nSCRIPT:",
+        flush=True
+    )
+
+    print(
+        result["script"],
         flush=True
     )
 
     print(
         f"\nScript words: "
-        f"{len(script.split())}",
+        f"{len(result['script'].split())}",
         flush=True
     )
 
@@ -546,7 +542,4 @@ def generate_content():
         flush=True
     )
 
-    return {
-        "title": title,
-        "script": script
-    }
+    return result
