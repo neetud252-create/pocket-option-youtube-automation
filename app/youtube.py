@@ -7,6 +7,10 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
 
+# ============================================================
+# SETTINGS
+# ============================================================
+
 DATA_DIR = "/app/data"
 
 TOKEN_FILE = os.path.join(
@@ -20,9 +24,15 @@ SCOPES = [
 ]
 
 
+# ============================================================
+# GET YOUTUBE SERVICE
+# ============================================================
+
 def get_youtube_service():
 
-    if not os.path.exists(TOKEN_FILE):
+    if not os.path.exists(
+        TOKEN_FILE
+    ):
 
         raise RuntimeError(
             "YouTube authorization token not found."
@@ -35,8 +45,14 @@ def get_youtube_service():
         )
     )
 
-    # Refresh expired access token
-    if credentials.expired and credentials.refresh_token:
+    # --------------------------------------------------------
+    # REFRESH EXPIRED TOKEN
+    # --------------------------------------------------------
+
+    if (
+        credentials.expired
+        and credentials.refresh_token
+    ):
 
         credentials.refresh(
             Request()
@@ -45,6 +61,10 @@ def get_youtube_service():
         save_credentials(
             credentials
         )
+
+    # --------------------------------------------------------
+    # VALIDATE CREDENTIALS
+    # --------------------------------------------------------
 
     if not credentials.valid:
 
@@ -61,6 +81,10 @@ def get_youtube_service():
 
     return youtube
 
+
+# ============================================================
+# SAVE CREDENTIALS
+# ============================================================
 
 def save_credentials(
     credentials
@@ -93,50 +117,35 @@ def save_credentials(
         )
 
 
+# ============================================================
+# UPLOAD SHORT
+# ============================================================
+
 def upload_short(
     video_path,
     title,
     description
 ):
 
-    if not os.path.exists(video_path):
+    # --------------------------------------------------------
+    # CHECK VIDEO
+    # --------------------------------------------------------
+
+    if not os.path.exists(
+        video_path
+    ):
 
         raise FileNotFoundError(
             f"Video not found: {video_path}"
         )
 
-    youtube = get_youtube_service()
-
-    body = {
-
-        "snippet": {
-
-            "title": title,
-
-            "description": description,
-
-            "categoryId": "22",
-
-        },
-
-        "status": {
-
-            "privacyStatus": "public",
-
-            "selfDeclaredMadeForKids": False,
-
-        }
-    }
-
-    media = MediaFileUpload(
-        video_path,
-        mimetype="video/mp4",
-        resumable=True,
-        chunksize=8 * 1024 * 1024
+    print(
+        "\n===== YOUTUBE UPLOAD =====",
+        flush=True
     )
 
     print(
-        "\n===== YOUTUBE UPLOAD =====",
+        f"File: {video_path}",
         flush=True
     )
 
@@ -146,9 +155,47 @@ def upload_short(
     )
 
     print(
-        "Uploading...",
+        "Privacy: UNLISTED",
         flush=True
     )
+
+    # --------------------------------------------------------
+    # CONNECT TO YOUTUBE
+    # --------------------------------------------------------
+
+    youtube = get_youtube_service()
+
+    # --------------------------------------------------------
+    # VIDEO METADATA
+    # --------------------------------------------------------
+
+    body = {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "categoryId": "22",
+        },
+
+        "status": {
+            "privacyStatus": "unlisted",
+            "selfDeclaredMadeForKids": False,
+        }
+    }
+
+    # --------------------------------------------------------
+    # VIDEO FILE
+    # --------------------------------------------------------
+
+    media = MediaFileUpload(
+        video_path,
+        mimetype="video/mp4",
+        resumable=True,
+        chunksize=8 * 1024 * 1024
+    )
+
+    # --------------------------------------------------------
+    # CREATE UPLOAD REQUEST
+    # --------------------------------------------------------
 
     request = youtube.videos().insert(
         part="snippet,status",
@@ -158,6 +205,10 @@ def upload_short(
 
     response = None
 
+    # --------------------------------------------------------
+    # UPLOAD
+    # --------------------------------------------------------
+
     while response is None:
 
         status, response = (
@@ -166,11 +217,19 @@ def upload_short(
 
         if status:
 
+            progress = int(
+                status.progress() * 100
+            )
+
             print(
                 f"Upload progress: "
-                f"{int(status.progress() * 100)}%",
+                f"{progress}%",
                 flush=True
             )
+
+    # --------------------------------------------------------
+    # GET VIDEO ID
+    # --------------------------------------------------------
 
     video_id = response.get(
         "id"
@@ -182,6 +241,10 @@ def upload_short(
             "YouTube upload completed "
             "but no video ID was returned."
         )
+
+    # --------------------------------------------------------
+    # VIDEO URL
+    # --------------------------------------------------------
 
     video_url = (
         f"https://www.youtube.com/shorts/"
@@ -200,6 +263,16 @@ def upload_short(
 
     print(
         f"URL: {video_url}",
+        flush=True
+    )
+
+    print(
+        "Privacy: UNLISTED",
+        flush=True
+    )
+
+    print(
+        "===================================",
         flush=True
     )
 
