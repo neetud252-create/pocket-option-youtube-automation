@@ -44,9 +44,7 @@ OPENING_TEXT_DURATION = 5.0
 # MEDIA DURATION
 # ============================================================
 
-def get_media_duration(
-    file_path: str
-) -> float:
+def get_media_duration(file_path: str) -> float:
 
     command = [
         "ffprobe",
@@ -68,8 +66,7 @@ def get_media_duration(
     if result.returncode != 0:
 
         raise RuntimeError(
-            f"Could not read media duration: "
-            f"{file_path}"
+            f"Could not read media duration: {file_path}"
         )
 
     data = json.loads(
@@ -85,13 +82,9 @@ def get_media_duration(
 # VALIDATE VIDEO
 # ============================================================
 
-def validate_video(
-    file_path: str
-):
+def validate_video(file_path: str):
 
-    if not os.path.exists(
-        file_path
-    ):
+    if not os.path.exists(file_path):
 
         raise FileNotFoundError(
             f"Video not found: {file_path}"
@@ -115,6 +108,40 @@ def validate_video(
     )
 
     return duration
+
+
+# ============================================================
+# RUN FFMPEG
+# ============================================================
+
+def run_ffmpeg(
+    command,
+    error_title
+):
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+
+        print(
+            f"\n===== {error_title} =====",
+            flush=True
+        )
+
+        print(
+            result.stderr[-20000:],
+            flush=True
+        )
+
+        raise RuntimeError(
+            error_title
+        )
+
+    return result
 
 
 # ============================================================
@@ -188,27 +215,10 @@ def create_cta_6sec():
         flush=True
     )
 
-    result = subprocess.run(
+    run_ffmpeg(
         command,
-        capture_output=True,
-        text=True
+        "CTA FFMPEG ERROR"
     )
-
-    if result.returncode != 0:
-
-        print(
-            "\n===== CTA FFMPEG ERROR =====",
-            flush=True
-        )
-
-        print(
-            result.stderr[-12000:],
-            flush=True
-        )
-
-        raise RuntimeError(
-            "6-second CTA creation failed."
-        )
 
     if not os.path.exists(
         cta_output
@@ -247,9 +257,9 @@ def generate_video(
         exist_ok=True
     )
 
-    # --------------------------------------------------------
-    # CTA CHECK
-    # --------------------------------------------------------
+    # ========================================================
+    # CHECK CTA
+    # ========================================================
 
     if not os.path.exists(
         CTA_FILE
@@ -297,9 +307,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # RANDOM TOTAL DURATION
-    # --------------------------------------------------------
+    # ========================================================
 
     final_duration = round(
         random.uniform(
@@ -347,9 +357,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------------
-    # FIND NORMAL CLIPS
-    # --------------------------------------------------------
+    # ========================================================
+    # FIND NORMAL FOOTAGE
+    # ========================================================
 
     all_clips = []
 
@@ -391,9 +401,9 @@ def generate_video(
             f"Found {len(all_clips)}."
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # RANDOM 4 CLIPS
-    # --------------------------------------------------------
+    # ========================================================
 
     selected_clips = random.sample(
         all_clips,
@@ -429,9 +439,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # VOICE
-    # --------------------------------------------------------
+    # ========================================================
 
     voice_duration = (
         get_media_duration(
@@ -445,15 +455,29 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------------
-    # CTA
-    # --------------------------------------------------------
+    if voice_duration > final_duration:
+
+        print(
+            f"Voice is {voice_duration:.2f}s "
+            f"and Short is {final_duration:.2f}s.",
+            flush=True
+        )
+
+        print(
+            "Voice will be trimmed to the "
+            "Short duration.",
+            flush=True
+        )
+
+    # ========================================================
+    # CREATE CTA
+    # ========================================================
 
     cta_6sec = create_cta_6sec()
 
-    # --------------------------------------------------------
+    # ========================================================
     # CLIP DURATION
-    # --------------------------------------------------------
+    # ========================================================
 
     clip_duration = (
         main_duration
@@ -466,9 +490,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # TEMP FILES
-    # --------------------------------------------------------
+    # ========================================================
 
     temp_main = os.path.join(
         OUTPUT_DIR,
@@ -480,6 +504,16 @@ def generate_video(
         "temp_main_4k.mp4"
     )
 
+    concat_list = os.path.join(
+        OUTPUT_DIR,
+        "concat_list.txt"
+    )
+
+    temp_joined = os.path.join(
+        OUTPUT_DIR,
+        "temp_joined.mp4"
+    )
+
     output_path = os.path.join(
         OUTPUT_DIR,
         output_filename
@@ -488,6 +522,8 @@ def generate_video(
     for file_path in [
         temp_main,
         temp_4k,
+        concat_list,
+        temp_joined,
         output_path
     ]:
 
@@ -501,6 +537,7 @@ def generate_video(
 
     # ========================================================
     # STEP 1
+    # CREATE MAIN VIDEO
     # ========================================================
 
     filter_parts = []
@@ -596,34 +633,18 @@ def generate_video(
     ])
 
     print(
-        "\nStep 1/3: Creating 4 random clips...",
+        "\nStep 1/4: Creating 4 random clips...",
         flush=True
     )
 
-    result = subprocess.run(
+    run_ffmpeg(
         command,
-        capture_output=True,
-        text=True
+        "STEP 1 FFMPEG ERROR"
     )
-
-    if result.returncode != 0:
-
-        print(
-            "\n===== STEP 1 FFMPEG ERROR =====",
-            flush=True
-        )
-
-        print(
-            result.stderr[-12000:],
-            flush=True
-        )
-
-        raise RuntimeError(
-            "Main video rendering failed."
-        )
 
     # ========================================================
     # STEP 2
+    # UPSCALE TO 4K
     # ========================================================
 
     opening_text = (
@@ -663,7 +684,6 @@ def generate_video(
 
         "fps=30,"
         "format=yuv420p"
-
         "[mainvideo]"
     )
 
@@ -704,107 +724,108 @@ def generate_video(
     ]
 
     print(
-        "\nStep 2/3: Upscaling main video to 4K...",
+        "\nStep 2/4: Upscaling main video to 4K...",
         flush=True
     )
 
-    result = subprocess.run(
+    run_ffmpeg(
         command,
-        capture_output=True,
-        text=True
+        "STEP 2 FFMPEG ERROR"
     )
-
-    if result.returncode != 0:
-
-        print(
-            "\n===== STEP 2 FFMPEG ERROR =====",
-            flush=True
-        )
-
-        print(
-            result.stderr[-12000:],
-            flush=True
-        )
-
-        raise RuntimeError(
-            "4K rendering failed."
-        )
 
     # ========================================================
     # STEP 3
-    # JOIN MAIN + CTA
+    # JOIN MAIN + CTA USING CONCAT DEMUXER
     # ========================================================
 
     print(
-        "\nStep 3/3: Joining main video + CTA...",
+        "\nStep 3/4: Joining main video + 6-second CTA...",
         flush=True
     )
 
-    final_filter = (
-        "[0:v]"
-        "scale=2160:3840:"
-        "force_original_aspect_ratio=disable,"
-        "fps=30,"
-        "setsar=1,"
-        "format=yuv420p,"
-        "setpts=PTS-STARTPTS"
-        "[main];"
+    # FFmpeg concat demuxer list
+    with open(
+        concat_list,
+        "w",
+        encoding="utf-8"
+    ) as file:
 
-        "[1:v]"
-        "scale=2160:3840:"
-        "force_original_aspect_ratio=disable,"
-        "fps=30,"
-        "setsar=1,"
-        "format=yuv420p,"
-        "setpts=PTS-STARTPTS"
-        "[cta];"
+        file.write(
+            "file '"
+            + temp_4k.replace(
+                "'",
+                "'\\''"
+            )
+            + "'\n"
+        )
 
-        "[main][cta]"
-        "concat=n=2:v=1:a=0,"
-        "fps=30,"
-        "format=yuv420p"
-        "[finalvideo]"
+        file.write(
+            "file '"
+            + cta_6sec.replace(
+                "'",
+                "'\\''"
+            )
+            + "'\n"
+        )
+
+    command = [
+        "ffmpeg",
+        "-y",
+
+        "-f",
+        "concat",
+
+        "-safe",
+        "0",
+
+        "-i",
+        concat_list,
+
+        "-c",
+        "copy",
+
+        "-movflags",
+        "+faststart",
+
+        temp_joined
+    ]
+
+    run_ffmpeg(
+        command,
+        "STEP 3 CONCAT ERROR"
     )
 
-    final_command = [
+    # ========================================================
+    # STEP 4
+    # ADD ELEVENLABS VOICE
+    # ========================================================
+
+    print(
+        "\nStep 4/4: Adding ElevenLabs voice...",
+        flush=True
+    )
+
+    command = [
         "ffmpeg",
         "-y",
 
         "-i",
-        temp_4k,
-
-        "-i",
-        cta_6sec,
+        temp_joined,
 
         "-i",
         voice_path,
 
-        "-filter_complex",
-        final_filter,
+        "-map",
+        "0:v:0",
 
         "-map",
-        "[finalvideo]",
-
-        "-map",
-        "2:a",
+        "1:a:0",
 
         "-t",
         f"{final_duration:.3f}",
 
         "-c:v",
-        "libx264",
-
-        "-preset",
-        "veryfast",
-
-        "-crf",
-        "23",
-
-        "-pix_fmt",
-        "yuv420p",
-
-        "-r",
-        "30",
+        "copy",
 
         "-c:a",
         "aac",
@@ -815,33 +836,18 @@ def generate_video(
         "-ar",
         "44100",
 
+        "-shortest",
+
         "-movflags",
         "+faststart",
 
         output_path
     ]
 
-    result = subprocess.run(
-        final_command,
-        capture_output=True,
-        text=True
+    run_ffmpeg(
+        command,
+        "STEP 4 AUDIO ERROR"
     )
-
-    if result.returncode != 0:
-
-        print(
-            "\n===== STEP 3 FFMPEG ERROR =====",
-            flush=True
-        )
-
-        print(
-            result.stderr[-20000:],
-            flush=True
-        )
-
-        raise RuntimeError(
-            "CTA append rendering failed."
-        )
 
     # ========================================================
     # FINAL VALIDATION
@@ -930,17 +936,19 @@ def generate_video(
     )
 
     print(
-        "==============================",
+        "================================",
         flush=True
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # CLEANUP
-    # --------------------------------------------------------
+    # ========================================================
 
     for file_path in [
         temp_main,
         temp_4k,
+        concat_list,
+        temp_joined,
         cta_6sec
     ]:
 
