@@ -10,13 +10,23 @@ from google_auth_oauthlib.flow import Flow
 
 from app.config import (
     YOUTUBE_DESCRIPTION,
-    GEMINI_API_KEY,
-    GEMINI_MODEL,
 )
-from app.content import generate_content
-from app.voice import generate_voice
-from app.video import generate_video
-from app.youtube import upload_short
+
+from app.content import (
+    generate_content,
+)
+
+from app.voice import (
+    generate_voice,
+)
+
+from app.video import (
+    generate_video,
+)
+
+from app.youtube import (
+    upload_short,
+)
 
 
 # ============================================================
@@ -30,15 +40,33 @@ BASE_DIR = os.path.dirname(
 )
 
 DATA_DIR = "/app/data"
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_DIR = os.path.join(
+    BASE_DIR,
+    "output"
+)
 
-TIMEZONE = ZoneInfo("Asia/Kolkata")
+os.makedirs(
+    DATA_DIR,
+    exist_ok=True
+)
 
-CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+os.makedirs(
+    OUTPUT_DIR,
+    exist_ok=True
+)
+
+TIMEZONE = ZoneInfo(
+    "Asia/Kolkata"
+)
+
+CLIENT_ID = os.getenv(
+    "GOOGLE_CLIENT_ID"
+)
+
+CLIENT_SECRET = os.getenv(
+    "GOOGLE_CLIENT_SECRET"
+)
 
 REDIRECT_URI = (
     "https://pocket-option-youtube-automation-production.up.railway.app"
@@ -52,10 +80,12 @@ SCOPES = [
 
 
 # ============================================================
-# FLASK APP
+# FLASK
 # ============================================================
 
-app = Flask(__name__)
+app = Flask(
+    __name__
+)
 
 oauth_flow = None
 
@@ -65,7 +95,11 @@ oauth_flow = None
 # ============================================================
 
 def generate_demo_volume():
-    amount = random.randint(1000, 2000)
+
+    amount = random.randint(
+        1000,
+        2000
+    )
 
     print(
         f"Random test amount generated: ${amount}",
@@ -76,41 +110,80 @@ def generate_demo_volume():
 
 
 # ============================================================
-# CREATE + UPLOAD SHORT
+# CREATE + UPLOAD
 # ============================================================
 
-def create_and_upload_short(reason="SCHEDULED"):
+def create_and_upload_short(
+    reason="SCHEDULED"
+):
 
-    print("\n" + "=" * 60, flush=True)
-    print("STARTING SHORT CREATION", flush=True)
-    print(f"Reason: {reason}", flush=True)
-    print("=" * 60, flush=True)
+    print(
+        "\n" + "=" * 60,
+        flush=True
+    )
+
+    print(
+        "STARTING SHORT CREATION",
+        flush=True
+    )
+
+    print(
+        f"Reason: {reason}",
+        flush=True
+    )
+
+    print(
+        "=" * 60,
+        flush=True
+    )
 
     try:
 
-        # ----------------------------------------------------
-        # 1. Generate content
-        # ----------------------------------------------------
+        # ====================================================
+        # 1. CONTENT
+        # ====================================================
 
-        print("\n[1/5] Generating content...", flush=True)
+        print(
+            "\n[1/5] Generating content...",
+            flush=True
+        )
 
         content = generate_content()
 
-        title = content["title"]
-        script = content["script"]
+        title = content[
+            "title"
+        ]
 
-        print("\n===== GENERATED CONTENT =====", flush=True)
-        print(f"Title: {title}", flush=True)
-        print(f"Script: {script}", flush=True)
-        print("==============================", flush=True)
+        script = content[
+            "script"
+        ]
 
-        # ----------------------------------------------------
+        print(
+            "\n===== GENERATED CONTENT =====",
+            flush=True
+        )
+
+        print(
+            f"Title: {title}",
+            flush=True
+        )
+
+        print(
+            f"Script: {script}",
+            flush=True
+        )
+
+        print(
+            "==============================",
+            flush=True
+        )
+
+        # ====================================================
         # 2. CTA
-        # ----------------------------------------------------
+        # ====================================================
 
         cta_text = (
-            "Want to activate the Pocket Option AI Bot? "
-            "Go to my channel, open the channel description, "
+            "Go to my channel description "
             "and click the Bot Activation button."
         )
 
@@ -122,17 +195,27 @@ def create_and_upload_short(reason="SCHEDULED"):
 
         print(
             "\nCTA:",
-            "Go to the channel description and click the Bot Activation button.",
             flush=True
         )
 
-        # ----------------------------------------------------
-        # 3. Voice
-        # ----------------------------------------------------
+        print(
+            "Go to my channel description "
+            "and click the Bot Activation button.",
+            flush=True
+        )
 
-        print("\n[2/5] Generating voice...", flush=True)
+        # ====================================================
+        # 3. VOICE
+        # ====================================================
 
-        timestamp = int(time.time())
+        print(
+            "\n[2/5] Generating voice...",
+            flush=True
+        )
+
+        timestamp = int(
+            time.time()
+        )
 
         voice_path = os.path.join(
             OUTPUT_DIR,
@@ -150,15 +233,17 @@ def create_and_upload_short(reason="SCHEDULED"):
             flush=True
         )
 
-        # ----------------------------------------------------
-        # 4. Random amount
-        # ----------------------------------------------------
+        # ====================================================
+        # 4. RANDOM AMOUNT
+        # ====================================================
 
-        short_amount = generate_demo_volume()
+        short_amount = (
+            generate_demo_volume()
+        )
 
-        # ----------------------------------------------------
-        # 5. Generate video
-        # ----------------------------------------------------
+        # ====================================================
+        # 5. VIDEO
+        # ====================================================
 
         print(
             "\n[3/5] Creating random-duration Short...",
@@ -181,9 +266,9 @@ def create_and_upload_short(reason="SCHEDULED"):
             flush=True
         )
 
-        # ----------------------------------------------------
-        # 6. Upload to YouTube
-        # ----------------------------------------------------
+        # ====================================================
+        # 6. YOUTUBE UPLOAD
+        # ====================================================
 
         print(
             "\n[4/5] Uploading to YouTube...",
@@ -196,15 +281,29 @@ def create_and_upload_short(reason="SCHEDULED"):
             description=YOUTUBE_DESCRIPTION
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # SUCCESS
-        # ----------------------------------------------------
+        # ====================================================
 
-        print("\n[5/5] COMPLETE", flush=True)
+        print(
+            "\n[5/5] COMPLETE",
+            flush=True
+        )
 
-        print("\n" + "=" * 60, flush=True)
-        print("SHORT CREATED SUCCESSFULLY", flush=True)
-        print("=" * 60, flush=True)
+        print(
+            "\n" + "=" * 60,
+            flush=True
+        )
+
+        print(
+            "SHORT CREATED SUCCESSFULLY",
+            flush=True
+        )
+
+        print(
+            "=" * 60,
+            flush=True
+        )
 
         print(
             f"Title: {title}",
@@ -227,7 +326,8 @@ def create_and_upload_short(reason="SCHEDULED"):
         )
 
         print(
-            "CTA message: Channel description → Bot Activation button",
+            "CTA: Channel description → "
+            "Bot Activation button",
             flush=True
         )
 
@@ -236,20 +336,40 @@ def create_and_upload_short(reason="SCHEDULED"):
             flush=True
         )
 
-        print("=" * 60 + "\n", flush=True)
+        print(
+            "=" * 60,
+            flush=True
+        )
 
         return upload_result
 
     except Exception as e:
 
-        print("\n" + "=" * 60, flush=True)
-        print("SHORT CREATION FAILED", flush=True)
-        print("=" * 60, flush=True)
         print(
-            f"ERROR: {type(e).__name__}: {e}",
+            "\n" + "=" * 60,
             flush=True
         )
-        print("=" * 60 + "\n", flush=True)
+
+        print(
+            "SHORT CREATION FAILED",
+            flush=True
+        )
+
+        print(
+            "=" * 60,
+            flush=True
+        )
+
+        print(
+            f"ERROR: "
+            f"{type(e).__name__}: {e}",
+            flush=True
+        )
+
+        print(
+            "=" * 60,
+            flush=True
+        )
 
         raise
 
@@ -258,12 +378,17 @@ def create_and_upload_short(reason="SCHEDULED"):
 # BACKGROUND RUNNER
 # ============================================================
 
-def run_short_background(reason="MANUAL"):
+def run_short_background(
+    reason="MANUAL"
+):
 
     def worker():
 
         try:
-            create_and_upload_short(reason)
+
+            create_and_upload_short(
+                reason
+            )
 
         except Exception as e:
 
@@ -287,17 +412,30 @@ def run_short_background(reason="MANUAL"):
 @app.route("/")
 def home():
 
-    return jsonify({
-        "status": "online",
-        "service": "Pocket Option YouTube Automation",
-        "timezone": "Asia/Kolkata",
-        "schedule": [
-            "10:00 AM IST",
-            "06:00 PM IST"
-        ],
-        "upload_privacy": "unlisted",
-        "cta": "6-second Bot Activation CTA"
-    })
+    return jsonify(
+        {
+            "status": "online",
+            "service":
+                "Pocket Option YouTube Automation",
+            "timezone":
+                "Asia/Kolkata",
+            "schedule": [
+                "10:00 AM IST",
+                "06:00 PM IST"
+            ],
+            "upload_privacy":
+                "unlisted",
+            "short_duration":
+                "20-25 seconds",
+            "normal_clips":
+                4,
+            "cta_duration":
+                "6 seconds",
+            "cta":
+                "Channel description → "
+                "Bot Activation button"
+        }
+    )
 
 
 # ============================================================
@@ -307,10 +445,15 @@ def home():
 @app.route("/health")
 def health():
 
-    return jsonify({
-        "status": "healthy",
-        "time": datetime.now(TIMEZONE).isoformat()
-    })
+    return jsonify(
+        {
+            "status": "healthy",
+            "time":
+                datetime.now(
+                    TIMEZONE
+                ).isoformat()
+        }
+    )
 
 
 # ============================================================
@@ -329,15 +472,20 @@ def run_test():
         "MANUAL TEST"
     )
 
-    return jsonify({
-        "status": "started",
-        "message": "Short generation started in background.",
-        "privacy": "unlisted"
-    })
+    return jsonify(
+        {
+            "status":
+                "started",
+            "message":
+                "Short generation started in background.",
+            "privacy":
+                "unlisted"
+        }
+    )
 
 
 # ============================================================
-# GOOGLE AUTHORIZATION
+# GOOGLE AUTHORIZE
 # ============================================================
 
 @app.route("/authorize")
@@ -345,17 +493,38 @@ def authorize():
 
     global oauth_flow
 
-    if not CLIENT_ID or not CLIENT_SECRET:
-        return jsonify({
-            "error": "GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET missing"
-        }), 500
+    if not CLIENT_ID:
+
+        return jsonify(
+            {
+                "error":
+                    "GOOGLE_CLIENT_ID missing"
+            }
+        ), 500
+
+    if not CLIENT_SECRET:
+
+        return jsonify(
+            {
+                "error":
+                    "GOOGLE_CLIENT_SECRET missing"
+            }
+        ), 500
 
     client_config = {
         "web": {
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id":
+                CLIENT_ID,
+
+            "client_secret":
+                CLIENT_SECRET,
+
+            "auth_uri":
+                "https://accounts.google.com/o/oauth2/auth",
+
+            "token_uri":
+                "https://oauth2.googleapis.com/token",
+
             "redirect_uris": [
                 REDIRECT_URI
             ]
@@ -392,9 +561,13 @@ def oauth2callback():
 
     if oauth_flow is None:
 
-        return jsonify({
-            "error": "OAuth session expired. Open /authorize again."
-        }), 400
+        return jsonify(
+            {
+                "error":
+                    "OAuth session expired. "
+                    "Open /authorize again."
+            }
+        ), 400
 
     try:
 
@@ -402,7 +575,9 @@ def oauth2callback():
             authorization_response=request.url
         )
 
-        credentials = oauth_flow.credentials
+        credentials = (
+            oauth_flow.credentials
+        )
 
         token_file = os.path.join(
             DATA_DIR,
@@ -412,12 +587,23 @@ def oauth2callback():
         import json
 
         token_data = {
-            "token": credentials.token,
-            "refresh_token": credentials.refresh_token,
-            "token_uri": credentials.token_uri,
-            "client_id": credentials.client_id,
-            "client_secret": credentials.client_secret,
-            "scopes": credentials.scopes,
+            "token":
+                credentials.token,
+
+            "refresh_token":
+                credentials.refresh_token,
+
+            "token_uri":
+                credentials.token_uri,
+
+            "client_id":
+                credentials.client_id,
+
+            "client_secret":
+                credentials.client_secret,
+
+            "scopes":
+                credentials.scopes,
         }
 
         with open(
@@ -453,9 +639,12 @@ def oauth2callback():
             flush=True
         )
 
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify(
+            {
+                "error":
+                    str(e)
+            }
+        ), 500
 
 
 # ============================================================
@@ -486,11 +675,21 @@ def scheduler_loop():
 
         try:
 
-            now = datetime.now(TIMEZONE)
+            now = datetime.now(
+                TIMEZONE
+            )
 
-            current_date = now.date()
-            current_hour = now.hour
-            current_minute = now.minute
+            current_date = (
+                now.date()
+            )
+
+            current_hour = (
+                now.hour
+            )
+
+            current_minute = (
+                now.minute
+            )
 
             should_run = (
                 current_hour in [10, 18]
@@ -498,19 +697,34 @@ def scheduler_loop():
             )
 
             already_ran = (
-                last_run_date == current_date
-                and last_run_hour == current_hour
+                last_run_date ==
+                current_date
+                and
+                last_run_hour ==
+                current_hour
             )
 
-            if should_run and not already_ran:
+            if (
+                should_run
+                and
+                not already_ran
+            ):
 
                 if current_hour == 10:
-                    reason = "SCHEDULED 10 AM IST"
+
+                    reason = (
+                        "SCHEDULED 10 AM IST"
+                    )
+
                 else:
-                    reason = "SCHEDULED 6 PM IST"
+
+                    reason = (
+                        "SCHEDULED 6 PM IST"
+                    )
 
                 print(
-                    f"\nSCHEDULE TRIGGERED: {reason}",
+                    f"\nSCHEDULE TRIGGERED: "
+                    f"{reason}",
                     flush=True
                 )
 
@@ -518,10 +732,17 @@ def scheduler_loop():
                     reason
                 )
 
-                last_run_date = current_date
-                last_run_hour = current_hour
+                last_run_date = (
+                    current_date
+                )
 
-            time.sleep(20)
+                last_run_hour = (
+                    current_hour
+                )
+
+            time.sleep(
+                20
+            )
 
         except Exception as e:
 
@@ -530,7 +751,9 @@ def scheduler_loop():
                 flush=True
             )
 
-            time.sleep(20)
+            time.sleep(
+                20
+            )
 
 
 # ============================================================
@@ -548,7 +771,8 @@ def heartbeat_loop():
             )
 
             print(
-                f"Heartbeat: {now.isoformat()}",
+                f"Heartbeat: "
+                f"{now.isoformat()}",
                 flush=True
             )
 
@@ -559,11 +783,13 @@ def heartbeat_loop():
                 flush=True
             )
 
-        time.sleep(300)
+        time.sleep(
+            300
+        )
 
 
 # ============================================================
-# START BACKGROUND TASKS
+# START BACKGROUND THREADS
 # ============================================================
 
 scheduler_thread = threading.Thread(
@@ -583,7 +809,7 @@ heartbeat_thread.start()
 
 
 # ============================================================
-# START SERVER
+# SERVER
 # ============================================================
 
 if __name__ == "__main__":
