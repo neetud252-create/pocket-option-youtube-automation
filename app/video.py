@@ -38,7 +38,7 @@ OUTPUT_DIR = os.path.join(
 TARGET_WIDTH = 2160
 TARGET_HEIGHT = 3840
 
-# 4 RANDOM CLIPS + 1 FIXED CTA CLIP
+# 4 RANDOM CLIPS + 1 FIXED CTA
 NUMBER_OF_CLIPS = 4
 
 MIN_DURATION = 15.0
@@ -46,7 +46,6 @@ MAX_DURATION = 20.0
 
 CTA_DURATION = 6.0
 
-# OPENING TEXT NOW SHOWS FOR 5 SECONDS
 OPENING_TEXT_DURATION = 5.0
 
 
@@ -54,7 +53,9 @@ OPENING_TEXT_DURATION = 5.0
 # GET MEDIA DURATION
 # ============================================================
 
-def get_media_duration(file_path: str) -> float:
+def get_media_duration(
+    file_path: str
+) -> float:
 
     command = [
         "ffprobe",
@@ -74,6 +75,7 @@ def get_media_duration(file_path: str) -> float:
     )
 
     if result.returncode != 0:
+
         raise RuntimeError(
             f"Could not read media duration: {file_path}"
         )
@@ -91,9 +93,14 @@ def get_media_duration(file_path: str) -> float:
 # VALIDATE VIDEO
 # ============================================================
 
-def validate_video(file_path: str):
+def validate_video(
+    file_path: str
+):
 
-    if not os.path.exists(file_path):
+    if not os.path.exists(
+        file_path
+    ):
+
         raise FileNotFoundError(
             f"Video not found: {file_path}"
         )
@@ -103,6 +110,7 @@ def validate_video(file_path: str):
     )
 
     if duration <= 0:
+
         raise RuntimeError(
             f"Invalid video: {file_path}"
         )
@@ -171,11 +179,13 @@ def get_cta_timing(
             )
 
             if cta_start is not None:
+
                 cta_start = float(
                     cta_start
                 )
 
             if cta_end is not None:
+
                 cta_end = float(
                     cta_end
                 )
@@ -273,6 +283,7 @@ def generate_video(
     if not os.path.exists(
         CTA_FILE
     ):
+
         raise FileNotFoundError(
             f"CTA video not found: {CTA_FILE}"
         )
@@ -294,7 +305,7 @@ def generate_video(
     )
 
     # ========================================================
-    # FIND ALL NORMAL FOOTAGE
+    # FIND NORMAL FOOTAGE
     # ========================================================
 
     all_clips = []
@@ -307,8 +318,7 @@ def generate_video(
             ".mp4"
         ):
 
-            # IMPORTANT:
-            # CTA MUST NEVER BE RANDOMLY SELECTED
+            # Never randomly select CTA
             if filename.lower() == "activation_cta.mp4":
                 continue
 
@@ -335,7 +345,7 @@ def generate_video(
         )
 
     # ========================================================
-    # SELECT EXACTLY 4 RANDOM NORMAL CLIPS
+    # SELECT 4 RANDOM CLIPS
     # ========================================================
 
     selected_clips = random.sample(
@@ -386,10 +396,6 @@ def generate_video(
         flush=True
     )
 
-    # ========================================================
-    # MAIN VIDEO DURATION
-    # ========================================================
-
     main_duration = min(
         voice_duration,
         MAX_DURATION
@@ -404,7 +410,6 @@ def generate_video(
             f"{MIN_DURATION:.2f}s."
         )
 
-    # Final duration = main video + CTA
     final_duration = (
         main_duration
         + cta_actual_duration
@@ -429,8 +434,8 @@ def generate_video(
     )
 
     # ========================================================
-    # OLD ELEVENLABS CTA TIMING
-    # KEEPING FOR TESTING
+    # OLD CTA TIMING
+    # KEPT ONLY FOR EXISTING TEST LOGIC
     # ========================================================
 
     cta_start, cta_end = get_cta_timing(
@@ -439,7 +444,7 @@ def generate_video(
     )
 
     print(
-        "\n===== OLD CTA TIMING =====",
+        "\n===== CTA TIMING =====",
         flush=True
     )
 
@@ -456,7 +461,7 @@ def generate_video(
     )
 
     print(
-        "==========================",
+        "======================",
         flush=True
     )
 
@@ -477,7 +482,7 @@ def generate_video(
     )
 
     # ========================================================
-    # TEMPORARY MAIN VIDEO
+    # TEMP MAIN VIDEO
     # ========================================================
 
     temp_main = os.path.join(
@@ -488,12 +493,13 @@ def generate_video(
     if os.path.exists(
         temp_main
     ):
+
         os.remove(
             temp_main
         )
 
     # ========================================================
-    # STEP 1 — CREATE 1080P MAIN CLIP SEQUENCE
+    # STEP 1 — 1080P MAIN CLIPS
     # ========================================================
 
     filter_parts = []
@@ -637,6 +643,7 @@ def generate_video(
     if os.path.exists(
         temp_4k
     ):
+
         os.remove(
             temp_4k
         )
@@ -649,12 +656,13 @@ def generate_video(
     if os.path.exists(
         output_path
     ):
+
         os.remove(
             output_path
         )
 
     # ========================================================
-    # OPENING TEXT
+    # EXISTING TEST OPENING TEXT
     # ========================================================
 
     opening_text = (
@@ -663,7 +671,8 @@ def generate_video(
     )
 
     # ========================================================
-    # MAIN VIDEO FILTER
+    # MAIN FILTER
+    # NO RED ARROW
     # ========================================================
 
     main_filter = (
@@ -700,9 +709,9 @@ def generate_video(
         "y=500:"
         "enable='between(t,0,5)',"
 
-        # ----------------------------------------------------
-        # LINE 2
-        # ----------------------------------------------------
+        # ====================================================
+        # LINK IN BIO
+        # ====================================================
 
         "drawtext="
         "fontfile=/usr/share/fonts/truetype/"
@@ -714,25 +723,7 @@ def generate_video(
         "fontsize=120:"
         "x=(w-text_w)/2:"
         "y=680:"
-        "enable='between(t,0,5)',"
-
-        # ====================================================
-        # RED ANIMATED BOTTOM ARROW
-        # ====================================================
-
-        "drawtext="
-        "fontfile=/usr/share/fonts/truetype/"
-        "dejavu/DejaVuSans-Bold.ttf:"
-        "text='↓':"
-        "fontcolor=#FF0000:"
-        "bordercolor=black:"
-        "borderw=14:"
-        "fontsize=300:"
-        "x=(w-text_w)/2:"
-        "y=3200+70*sin(t*8):"
-        f"enable='between(t,"
-        f"{cta_start:.3f},"
-        f"{cta_end:.3f})'"
+        "enable='between(t,0,5)'"
 
         "[mainvideo]"
     )
@@ -770,7 +761,7 @@ def generate_video(
 
     print(
         "\nStep 2/3: "
-        "Upscaling main video to 4K + existing testing text + arrow...",
+        "Upscaling main video to 4K + existing testing text...",
         flush=True
     )
 
@@ -805,7 +796,7 @@ def generate_video(
         )
 
     # ========================================================
-    # STEP 3 — APPEND FIXED CTA VIDEO
+    # STEP 3 — APPEND FIXED CTA
     # ========================================================
 
     print(
@@ -984,7 +975,7 @@ def generate_video(
     )
 
     print(
-        "CTA arrow: RED + ANIMATED + BOTTOM",
+        "Red arrow: REMOVED",
         flush=True
     )
 
@@ -1000,7 +991,7 @@ def generate_video(
     )
 
     # ========================================================
-    # REMOVE TEMPORARY FILES
+    # REMOVE TEMP FILES
     # ========================================================
 
     for temp_file in [
