@@ -38,7 +38,8 @@ OUTPUT_DIR = os.path.join(
 TARGET_WIDTH = 2160
 TARGET_HEIGHT = 3840
 
-NUMBER_OF_CLIPS = 5
+# 4 RANDOM CLIPS + 1 FIXED CTA CLIP
+NUMBER_OF_CLIPS = 4
 
 MIN_DURATION = 15.0
 MAX_DURATION = 20.0
@@ -90,13 +91,9 @@ def get_media_duration(file_path: str) -> float:
 # VALIDATE VIDEO
 # ============================================================
 
-def validate_video(
-    file_path: str
-):
+def validate_video(file_path: str):
 
-    if not os.path.exists(
-        file_path
-    ):
+    if not os.path.exists(file_path):
         raise FileNotFoundError(
             f"Video not found: {file_path}"
         )
@@ -174,13 +171,11 @@ def get_cta_timing(
             )
 
             if cta_start is not None:
-
                 cta_start = float(
                     cta_start
                 )
 
             if cta_end is not None:
-
                 cta_end = float(
                     cta_end
                 )
@@ -286,11 +281,6 @@ def generate_video(
         CTA_FILE
     )
 
-    if cta_actual_duration <= 0:
-        raise RuntimeError(
-            "CTA video has invalid duration."
-        )
-
     print(
         f"\nCTA video found: "
         f"{os.path.basename(CTA_FILE)}",
@@ -317,7 +307,8 @@ def generate_video(
             ".mp4"
         ):
 
-            # NEVER include activation_cta.mp4
+            # IMPORTANT:
+            # CTA MUST NEVER BE RANDOMLY SELECTED
             if filename.lower() == "activation_cta.mp4":
                 continue
 
@@ -335,15 +326,16 @@ def generate_video(
         flush=True
     )
 
-    if len(all_clips) < 10:
+    if len(all_clips) < NUMBER_OF_CLIPS:
 
         raise RuntimeError(
-            f"Need at least 10 normal footage clips. "
+            f"Need at least {NUMBER_OF_CLIPS} "
+            f"normal footage clips. "
             f"Found {len(all_clips)}."
         )
 
     # ========================================================
-    # SELECT EXACTLY 5 RANDOM NORMAL CLIPS
+    # SELECT EXACTLY 4 RANDOM NORMAL CLIPS
     # ========================================================
 
     selected_clips = random.sample(
@@ -356,7 +348,7 @@ def generate_video(
     )
 
     print(
-        "\n===== SELECTED CLIPS =====",
+        "\n===== SELECTED RANDOM CLIPS =====",
         flush=True
     )
 
@@ -376,7 +368,7 @@ def generate_video(
         )
 
     print(
-        "==========================",
+        "=================================",
         flush=True
     )
 
@@ -394,9 +386,9 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # MAIN VIDEO DURATION
-    # --------------------------------------------------------
+    # ========================================================
 
     main_duration = min(
         voice_duration,
@@ -412,7 +404,7 @@ def generate_video(
             f"{MIN_DURATION:.2f}s."
         )
 
-    # Final duration now includes CTA
+    # Final duration = main video + CTA
     final_duration = (
         main_duration
         + cta_actual_duration
@@ -438,10 +430,8 @@ def generate_video(
 
     # ========================================================
     # OLD ELEVENLABS CTA TIMING
+    # KEEPING FOR TESTING
     # ========================================================
-
-    # KEEPING THIS FOR TESTING.
-    # Existing red arrow system remains unchanged.
 
     cta_start, cta_end = get_cta_timing(
         voice_path,
@@ -498,7 +488,6 @@ def generate_video(
     if os.path.exists(
         temp_main
     ):
-
         os.remove(
             temp_main
         )
@@ -648,7 +637,6 @@ def generate_video(
     if os.path.exists(
         temp_4k
     ):
-
         os.remove(
             temp_4k
         )
@@ -661,7 +649,6 @@ def generate_video(
     if os.path.exists(
         output_path
     ):
-
         os.remove(
             output_path
         )
@@ -746,6 +733,8 @@ def generate_video(
         f"enable='between(t,"
         f"{cta_start:.3f},"
         f"{cta_end:.3f})'"
+
+        "[mainvideo]"
     )
 
     command = [
@@ -759,7 +748,7 @@ def generate_video(
         main_filter,
 
         "-map",
-        "[v0]",
+        "[mainvideo]",
 
         "-c:v",
         "libx264",
@@ -816,7 +805,7 @@ def generate_video(
         )
 
     # ========================================================
-    # STEP 3 — APPEND 6-SECOND CTA
+    # STEP 3 — APPEND FIXED CTA VIDEO
     # ========================================================
 
     print(
@@ -825,19 +814,21 @@ def generate_video(
         flush=True
     )
 
-    # --------------------------------------------------------
-    # Normalize CTA to 2160x3840 and 30 FPS
-    # --------------------------------------------------------
-
     final_command = [
         "ffmpeg",
         "-y",
 
+        # MAIN VIDEO
         "-i",
         temp_4k,
 
+        # CTA VIDEO
         "-i",
         CTA_FILE,
+
+        # VOICE AUDIO
+        "-i",
+        voice_path,
 
         "-filter_complex",
 
@@ -864,9 +855,6 @@ def generate_video(
 
         "-map",
         "[finalvideo]",
-
-        "-i",
-        voice_path,
 
         "-map",
         "2:a",
@@ -1031,11 +1019,10 @@ def generate_video(
                 )
 
         except Exception:
-
             pass
 
     print(
-        "\n===== 5-CLIP + CTA 4K VIDEO SUCCESS =====",
+        "\n===== 4-CLIP + CTA 4K VIDEO SUCCESS =====",
         flush=True
     )
 
