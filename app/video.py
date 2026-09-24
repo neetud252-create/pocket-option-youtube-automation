@@ -11,8 +11,6 @@ import uuid
 # CONFIG
 # ============================================================
 
-# The repository stores all 15 normal clips + activation_cta.mp4
-# inside assets/footage.
 ASSETS_DIR = "/app/assets/footage"
 OUTPUT_DIR = "/app/output"
 
@@ -23,10 +21,7 @@ CTA_DURATION = 5.0
 FINAL_VIDEO_DURATION = 25.0
 OPENING_TEXT_DURATION = 5.0
 
-CTA_SOURCE = os.path.join(
-    ASSETS_DIR,
-    "activation_cta.mp4",
-)
+CTA_SOURCE = os.path.join(ASSETS_DIR, "activation_cta.mp4")
 
 RANDOM_VIDEO_FILES = [
     "01_chart_overview.mp4",
@@ -51,7 +46,7 @@ RANDOM_VIDEO_FILES = [
 # PROCESS / MEDIA HELPERS
 # ============================================================
 
-def run_command(command, description="FFmpeg command", timeout=420):
+def run_command(command, description="FFmpeg command", timeout=600):
     print(f"\nRunning: {description}", flush=True)
 
     try:
@@ -109,9 +104,7 @@ def get_duration(path):
     duration = data.get("format", {}).get("duration")
 
     if duration is None:
-        raise RuntimeError(
-            f"Could not determine duration: {path}"
-        )
+        raise RuntimeError(f"Could not determine duration: {path}")
 
     return float(duration)
 
@@ -129,81 +122,57 @@ def validate_clip(path):
         raise RuntimeError(f"Missing clip: {path}")
 
     if not has_stream(path, "video"):
-        raise RuntimeError(
-            f"File has no video stream: {path}"
-        )
+        raise RuntimeError(f"File has no video stream: {path}")
 
     duration = get_duration(path)
-
     if duration < 0.5:
-        raise RuntimeError(
-            f"Video is too short: {path}"
-        )
+        raise RuntimeError(f"Video is too short: {path}")
 
     return duration
 
 
 def validate_voice(voice_path):
     if not voice_path or not os.path.exists(voice_path):
-        raise RuntimeError(
-            f"Voice file does not exist: {voice_path}"
-        )
+        raise RuntimeError(f"Voice file does not exist: {voice_path}")
 
     if os.path.getsize(voice_path) <= 0:
         raise RuntimeError("Voice file is empty.")
 
     if not has_stream(voice_path, "audio"):
-        raise RuntimeError(
-            "Voice file contains no audio stream."
-        )
+        raise RuntimeError("Voice file contains no audio stream.")
 
     duration = get_duration(voice_path)
-
     if duration <= 0:
         raise RuntimeError("Voice duration is zero.")
 
-    print(
-        f"Voice validated: {duration:.3f} seconds",
-        flush=True,
-    )
+    print(f"Voice validated: {duration:.3f} seconds", flush=True)
     return duration
 
 
 def validate_final_video(output_path):
     if not os.path.exists(output_path):
-        raise RuntimeError(
-            "Final video was not created."
-        )
+        raise RuntimeError("Final video was not created.")
 
     if os.path.getsize(output_path) <= 0:
-        raise RuntimeError(
-            "Final video is empty."
-        )
+        raise RuntimeError("Final video is empty.")
 
     if not has_stream(output_path, "video"):
-        raise RuntimeError(
-            "FINAL VIDEO HAS NO VIDEO STREAM."
-        )
+        raise RuntimeError("FINAL VIDEO HAS NO VIDEO STREAM.")
 
     if not has_stream(output_path, "audio"):
-        raise RuntimeError(
-            "FINAL VIDEO HAS NO AUDIO STREAM."
-        )
+        raise RuntimeError("FINAL VIDEO HAS NO AUDIO STREAM.")
 
     duration = get_duration(output_path)
-
     if abs(duration - FINAL_VIDEO_DURATION) > 0.20:
         raise RuntimeError(
             f"FINAL VIDEO IS NOT 25 SECONDS: {duration:.3f}"
         )
 
     print(
-        f"FINAL VIDEO VALIDATION PASSED | "
-        f"duration={duration:.3f}s | "
+        f"FINAL VIDEO VALIDATION PASSED | duration={duration:.3f}s | "
         f"size={os.path.getsize(output_path)/(1024*1024):.2f}MB",
         flush=True,
     )
-
     return True
 
 
@@ -222,45 +191,51 @@ def escape_drawtext(value):
 # ============================================================
 
 def select_random_clips():
-    available = []
-
-    for filename in RANDOM_VIDEO_FILES:
-        path = os.path.join(ASSETS_DIR, filename)
-        if os.path.exists(path):
-            available.append(path)
+    available = [
+        os.path.join(ASSETS_DIR, filename)
+        for filename in RANDOM_VIDEO_FILES
+        if os.path.exists(os.path.join(ASSETS_DIR, filename))
+    ]
 
     if len(available) < NUMBER_OF_CLIPS:
         raise RuntimeError(
             f"Not enough normal clips. Found {len(available)}, "
-            f"need {NUMBER_OF_CLIPS}. "
-            f"Expected directory: {ASSETS_DIR}"
+            f"need {NUMBER_OF_CLIPS}. Expected directory: {ASSETS_DIR}"
         )
 
-    selected = random.sample(
-        available,
-        NUMBER_OF_CLIPS,
-    )
+    # Exactly four DIFFERENT clips from the 15-clip normal footage pool.
+    selected = random.sample(available, NUMBER_OF_CLIPS)
     random.shuffle(selected)
 
     print("\nSelected random clips:", flush=True)
     for index, clip in enumerate(selected, start=1):
-        print(
-            f"{index}. {os.path.basename(clip)}",
-            flush=True,
-        )
+        print(f"{index}. {os.path.basename(clip)}", flush=True)
 
     return selected
 
 
-def build_silent_video(
-    selected_clips,
-    short_amount,
-    output_path,
-):
+def quality_filter(input_index, output_label, trim_expression):
+    # 1080x1920 is the ideal upload resolution for Shorts. Lanczos scaling,
+    # light sharpening and conservative contrast/saturation enhancement improve
+    # perceived quality without inventing detail or over-processing the UI.
+    return (
+        f"[{input_index}:v]"
+        f"{trim_expression},"
+        "setpts=PTS-STARTPTS,"
+        "scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,"
+        "setsar=1,"
+        "fps=30,"
+        "unsharp=5:5:0.50:5:5:0.0,"
+        "eq=contrast=1.03:saturation=1.04,"
+        "format=yuv420p"
+        f"[{output_label}]"
+    )
+
+
+def build_silent_video(selected_clips, short_amount, output_path):
     if not os.path.exists(CTA_SOURCE):
-        raise RuntimeError(
-            f"Missing fixed CTA video: {CTA_SOURCE}"
-        )
+        raise RuntimeError(f"Missing fixed CTA video: {CTA_SOURCE}")
 
     validate_clip(CTA_SOURCE)
 
@@ -270,87 +245,49 @@ def build_silent_video(
     for index, clip in enumerate(selected_clips):
         duration = validate_clip(clip)
         max_start = max(0.0, duration - CLIP_DURATION)
-        start = (
-            random.uniform(0.0, max_start)
-            if max_start > 0.20
-            else 0.0
-        )
+        start = random.uniform(0.0, max_start) if max_start > 0.20 else 0.0
 
-        input_args.extend([
-            "-stream_loop",
-            "-1",
-            "-i",
-            clip,
-        ])
-
+        input_args.extend(["-stream_loop", "-1", "-i", clip])
         filters.append(
-            f"[{index}:v]"
-            f"trim=start={start:.3f}:duration={CLIP_DURATION:.3f},"
-            "setpts=PTS-STARTPTS,"
-            "scale=1080:1920:force_original_aspect_ratio=decrease,"
-            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,"
-            "setsar=1,"
-            "fps=30,"
-            "format=yuv420p"
-            f"[v{index}]"
+            quality_filter(
+                index,
+                f"v{index}",
+                f"trim=start={start:.3f}:duration={CLIP_DURATION:.3f}",
+            )
         )
 
+    # Fixed CTA is ALWAYS the final fifth clip and is never part of random selection.
     cta_input_index = NUMBER_OF_CLIPS
-    input_args.extend([
-        "-stream_loop",
-        "-1",
-        "-i",
-        CTA_SOURCE,
-    ])
-
+    input_args.extend(["-stream_loop", "-1", "-i", CTA_SOURCE])
     filters.append(
-        f"[{cta_input_index}:v]"
-        f"trim=duration={CTA_DURATION:.3f},"
-        "setpts=PTS-STARTPTS,"
-        "scale=1080:1920:force_original_aspect_ratio=decrease,"
-        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,"
-        "setsar=1,"
-        "fps=30,"
-        "format=yuv420p"
-        "[vcta]"
+        quality_filter(
+            cta_input_index,
+            "vcta",
+            f"trim=duration={CTA_DURATION:.3f}",
+        )
     )
 
     concat_inputs = "".join(
-        f"[v{index}]"
-        for index in range(NUMBER_OF_CLIPS)
+        f"[v{index}]" for index in range(NUMBER_OF_CLIPS)
     ) + "[vcta]"
 
     filters.append(
-        f"{concat_inputs}"
-        f"concat=n={NUMBER_OF_CLIPS + 1}:v=1:a=0"
-        "[joined]"
+        f"{concat_inputs}concat=n={NUMBER_OF_CLIPS + 1}:v=1:a=0[joined]"
     )
 
-    amount_text = escape_drawtext(
-        f"I MADE: ${short_amount} EVERY DAY"
-    )
+    amount_text = escape_drawtext(f"I MADE: ${short_amount} EVERY DAY")
     link_text = escape_drawtext("LINK IN BIO")
 
     filters.append(
         "[joined]"
         "drawtext="
         f"text='{amount_text}':"
-        "fontcolor=white:"
-        "fontsize=62:"
-        "borderw=4:"
-        "bordercolor=black:"
-        "x=(w-text_w)/2:"
-        "y=180:"
-        "enable='between(t,0,5)',"
+        "fontcolor=white:fontsize=62:borderw=4:bordercolor=black:"
+        "x=(w-text_w)/2:y=180:enable='between(t,0,5)',"
         "drawtext="
         f"text='{link_text}':"
-        "fontcolor=white:"
-        "fontsize=55:"
-        "borderw=4:"
-        "bordercolor=black:"
-        "x=(w-text_w)/2:"
-        "y=270:"
-        "enable='between(t,0,5)'"
+        "fontcolor=white:fontsize=55:borderw=4:bordercolor=black:"
+        "x=(w-text_w)/2:y=270:enable='between(t,0,5)'"
         "[outv]"
     )
 
@@ -368,9 +305,13 @@ def build_silent_video(
         "-c:v",
         "libx264",
         "-preset",
-        "veryfast",
+        "medium",
         "-crf",
-        "20",
+        "17",
+        "-profile:v",
+        "high",
+        "-level",
+        "4.2",
         "-pix_fmt",
         "yuv420p",
         "-r",
@@ -380,13 +321,9 @@ def build_silent_video(
         output_path,
     ]
 
-    run_command(
-        command,
-        "Rendering 4 random clips + fixed CTA",
-    )
+    run_command(command, "Rendering HQ 4 random clips + fixed CTA")
 
     duration = get_duration(output_path)
-
     if abs(duration - FINAL_VIDEO_DURATION) > 0.20:
         raise RuntimeError(
             f"Silent video is not 25 seconds: {duration:.3f}"
@@ -395,11 +332,7 @@ def build_silent_video(
     return output_path
 
 
-def mux_audio(
-    video_path,
-    voice_path,
-    output_path,
-):
+def mux_audio(video_path, voice_path, output_path):
     voice_duration = validate_voice(voice_path)
 
     if abs(voice_duration - FINAL_VIDEO_DURATION) > 0.20:
@@ -460,9 +393,7 @@ def generate_video(
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     if not voice_path:
-        raise RuntimeError(
-            "voice_path was not provided."
-        )
+        raise RuntimeError("voice_path was not provided.")
 
     validate_voice(voice_path)
     selected_clips = select_random_clips()
@@ -479,66 +410,28 @@ def generate_video(
         else os.path.join(OUTPUT_DIR, output_filename)
     )
 
-    silent_path = os.path.join(
-        temp_dir,
-        "silent_25.mp4",
-    )
-    muxed_path = os.path.join(
-        temp_dir,
-        "final_25.mp4",
-    )
+    silent_path = os.path.join(temp_dir, "silent_25.mp4")
+    muxed_path = os.path.join(temp_dir, "final_25.mp4")
 
     try:
-        print(
-            "\n==================================================",
-            flush=True,
-        )
-        print(
-            "GENERATING 25-SECOND SHORT",
-            flush=True,
-        )
-        print(
-            "4 random clips x 5s + fixed CTA x 5s",
-            flush=True,
-        )
-        print(
-            "==================================================",
-            flush=True,
-        )
+        print("\n==================================================", flush=True)
+        print("GENERATING HIGH-QUALITY 25-SECOND SHORT", flush=True)
+        print("4 RANDOM clips x 5s + FIXED CTA x 5s", flush=True)
+        print("Output: 1080x1920, H.264 High, CRF 17, 30 FPS", flush=True)
+        print("==================================================", flush=True)
 
-        build_silent_video(
-            selected_clips,
-            short_amount,
-            silent_path,
-        )
-
-        mux_audio(
-            silent_path,
-            voice_path,
-            muxed_path,
-        )
-
+        build_silent_video(selected_clips, short_amount, silent_path)
+        mux_audio(silent_path, voice_path, muxed_path)
         validate_final_video(muxed_path)
 
         if os.path.exists(final_path):
             os.remove(final_path)
 
-        shutil.copy2(
-            muxed_path,
-            final_path,
-        )
-
+        shutil.copy2(muxed_path, final_path)
         validate_final_video(final_path)
 
-        print(
-            f"VIDEO GENERATION SUCCESS: {final_path}",
-            flush=True,
-        )
-
+        print(f"VIDEO GENERATION SUCCESS: {final_path}", flush=True)
         return final_path
 
     finally:
-        shutil.rmtree(
-            temp_dir,
-            ignore_errors=True,
-        )
+        shutil.rmtree(temp_dir, ignore_errors=True)
