@@ -1,6 +1,6 @@
 import os
-import json
 import random
+import threading
 import time
 from datetime import timezone
 
@@ -27,6 +27,7 @@ SCOPES = [
 
 UPLOAD_RETRY_COUNT = 6
 RETRYABLE_HTTP_CODES = {429, 500, 502, 503, 504}
+YOUTUBE_AUTH_LOCK = threading.Lock()
 
 
 # ============================================================
@@ -34,60 +35,61 @@ RETRYABLE_HTTP_CODES = {429, 500, 502, 503, 504}
 # ============================================================
 
 def save_credentials(credentials):
+    """
+    Persist the complete Google credential JSON, including expiry.
+    Atomic replacement protects the persistent token file from partial writes.
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
-
-    data = {
-        "token": credentials.token,
-        "refresh_token": credentials.refresh_token,
-        "token_uri": credentials.token_uri,
-        "client_id": credentials.client_id,
-        "client_secret": credentials.client_secret,
-        "scopes": credentials.scopes,
-    }
-
     temp_file = TOKEN_FILE + ".tmp"
 
     with open(temp_file, "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2)
+        file.write(credentials.to_json())
 
     os.replace(temp_file, TOKEN_FILE)
 
 
 def get_youtube_service():
-    if not os.path.exists(TOKEN_FILE):
-        raise RuntimeError(
-            "YouTube authorization token not found. "
-            "Open /authorize and reconnect YouTube."
-        )
+    """
+    Build an authenticated YouTube client.
 
-    credentials = Credentials.from_authorized_user_file(
-        TOKEN_FILE,
-        SCOPES,
-    )
-
-    if credentials.expired and credentials.refresh_token:
-        try:
-            credentials.refresh(Request())
-            save_credentials(credentials)
-            print("YouTube OAuth token refreshed.", flush=True)
-        except Exception as exc:
+    The lock prevents the scheduler and status-monitor thread from trying to
+    refresh and rewrite the same OAuth token at the same time.
+    """
+    with YOUTUBE_AUTH_LOCK:
+        if not os.path.exists(TOKEN_FILE):
             raise RuntimeError(
-                "YouTube token refresh failed. "
+                "YouTube authorization token not found. "
                 "Open /authorize and reconnect YouTube."
-            ) from exc
+            )
 
-    if not credentials.valid:
-        raise RuntimeError(
-            "YouTube credentials are invalid. "
-            "Open /authorize and reconnect YouTube."
+        credentials = Credentials.from_authorized_user_file(
+            TOKEN_FILE,
+            SCOPES,
         )
 
-    return build(
-        "youtube",
-        "v3",
-        credentials=credentials,
-        cache_discovery=False,
-    )
+        if credentials.expired and credentials.refresh_token:
+            try:
+                credentials.refresh(Request())
+                save_credentials(credentials)
+                print("YouTube OAuth token refreshed.", flush=True)
+            except Exception as exc:
+                raise RuntimeError(
+                    "YouTube token refresh failed. "
+                    "Open /authorize and reconnect YouTube."
+                ) from exc
+
+        if not credentials.valid:
+            raise RuntimeError(
+                "YouTube credentials are invalid. "
+                "Open /authorize and reconnect YouTube."
+            )
+
+        return build(
+            "youtube",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False,
+        )
 
 
 # ============================================================
@@ -192,9 +194,7 @@ def _upload_video(
             status_response, response = upload_request.next_chunk()
 
             if status_response:
-                progress = int(
-                    status_response.progress() * 100
-                )
+                progress = int(status_response.progress() * 100)
                 print(
                     f"Upload progress: {progress}%",
                     flush=True,
@@ -271,11 +271,7 @@ def _upload_video(
 # PUBLIC UPLOAD FUNCTIONS
 # ============================================================
 
-def upload_short(
-    video_path,
-    title,
-    description,
-):
+def upload_short(video_path, title, description):
     print("\n===== MANUAL TEST UPLOAD =====", flush=True)
     print("Mode: UNLISTED", flush=True)
 
@@ -333,9 +329,7 @@ def get_video_status(video_id):
         raise ValueError("video_id is required.")
 
     if not isinstance(video_id, str):
-        raise TypeError(
-            "video_id must be a string."
-        )
+        raise TypeError("video_id must be a string.")
 
     youtube = get_youtube_service()
 
