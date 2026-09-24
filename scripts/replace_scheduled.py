@@ -6,6 +6,13 @@ import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+# When Railway runs this file directly as `python scripts/replace_scheduled.py`,
+# Python places /app/scripts on sys.path instead of the repository root. Add the
+# repo root explicitly so imports from the app package always work.
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from app.config import YOUTUBE_DESCRIPTION
 from app.content import generate_content
 from app.video import generate_video
@@ -131,7 +138,6 @@ def main():
     data = load_buffer()
     target_iso_values = {slot.isoformat() for slot in slots}
 
-    # Collect existing scheduled videos from the persistent queue.
     existing_ids = []
     for record in data.get("slots", []):
         if slot_matches_target(record, target_iso_values):
@@ -139,7 +145,6 @@ def main():
             if video_id:
                 existing_ids.append(str(video_id))
 
-    # Optional explicit IDs are useful if an old queue record was lost.
     extra_ids = os.getenv("FORCE_REPLACE_VIDEO_IDS", "").strip()
     if extra_ids:
         existing_ids.extend(
@@ -154,7 +159,6 @@ def main():
         print(f"Deleting old scheduled video: {video_id}", flush=True)
         delete_video(video_id)
 
-    # Remove old target slots from the persistent queue before creating replacements.
     data["slots"] = [
         record
         for record in data.get("slots", [])
@@ -180,7 +184,6 @@ def main():
         video_path = None
 
         try:
-            # Paid ElevenLabs voice is mandatory for this replacement.
             generate_voice(
                 script,
                 CTA_TEXT,
