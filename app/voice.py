@@ -35,6 +35,12 @@ CTA_AUDIO_SECONDS = 5.0
 FINAL_AUDIO_SECONDS = 25.0
 ELEVENLABS_RETRIES = 3
 
+# Short-form pacing: remove long dead-air pauses while keeping a small,
+# natural gap between phrases/sentences.
+SILENCE_THRESHOLD_DB = -48
+LONG_PAUSE_SECONDS = 0.28
+KEPT_PAUSE_SECONDS = 0.10
+
 
 # ============================================================
 # PROCESS HELPERS
@@ -155,11 +161,13 @@ def elevenlabs_tts(text, output_path):
         "text": text,
         "model_id": MODEL_ID,
         "voice_settings": {
-            "stability": 0.50,
+            "stability": 0.48,
             "similarity_boost": 0.85,
-            "style": 0.10,
+            "style": 0.08,
             "use_speaker_boost": True,
-            "speed": 0.96,
+            # Slightly quicker base delivery for Shorts. Final timing is
+            # normalized later, so this mainly improves sentence energy.
+            "speed": 1.03,
         },
     }
 
@@ -279,9 +287,9 @@ def piper_tts(text, output_path):
 
 def generate_raw_segment(text, output_path, require_elevenlabs=False):
     """
-    Scheduled production Shorts use require_elevenlabs=True, guaranteeing the
-    new scheduled videos use the paid ElevenLabs voice. Other/manual jobs may
-    still use Piper as a safety fallback.
+    Scheduled production Shorts can use require_elevenlabs=True to guarantee
+    the paid ElevenLabs voice. Other/manual jobs may use Piper as a safety
+    fallback if ElevenLabs is temporarily unavailable.
     """
     try:
         if os.getenv("ELEVENLABS_API_KEY"):
@@ -308,15 +316,62 @@ def generate_raw_segment(text, output_path, require_elevenlabs=False):
 # TIMING / ALIGNMENT
 # ============================================================
 
-def atempo_filter_for_speed(speed_factor):
-    factor = max(1.0, float(speed_factor))
+def compact_silence(input_path, output_path):
+    """Compress long pauses inside narration to short natural pauses."""
+    validate_audio(input_path)
+
+    silence_filter = (
+        "silenceremove="
+        f"start_periods=1:start_duration=0.03:start_threshold={SILENCE_THRESHOLD_DB}dB:"
+        f"stop_periods=-1:stop_duration={LONG_PAUSE_SECONDS:.2f}:"
+        f"stop_threshold={SILENCE_THRESHOLD_DB}dB:"
+        f"stop_silence={KEPT_PAUSE_SECONDS:.2f}"
+    )
+
+    run_command(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            input_path,
+            "-vn",
+            "-af",
+            silence_filter,
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            "-ar",
+            "44100",
+            "-ac",
+            "1",
+            output_path,
+        ],
+        "Compressing long narration pauses",
+    )
+
+    validate_audio(output_path)
+    return output_path
+
+
+def atempo_filters_for_factor(speed_factor):
+    """
+    Build valid FFmpeg atempo filters for both speed-up (>1) and
+    slow-down (<1). This lets narration fill its 20-second section instead
+    of being followed by several seconds of dead air.
+    """
+    factor = max(0.10, float(speed_factor))
     filters = []
 
     while factor > 2.0:
         filters.append("atempo=2.0")
         factor /= 2.0
 
-    if factor > 1.001:
+    while factor < 0.5:
+        filters.append("atempo=0.5")
+        factor /= 0.5
+
+    if abs(factor - 1.0) > 0.001:
         filters.append(f"atempo={factor:.6f}")
 
     return filters
@@ -324,15 +379,13 @@ def atempo_filter_for_speed(speed_factor):
 
 def fit_audio_to_exact_duration(input_path, output_path, target_seconds):
     original_duration = validate_audio(input_path)
+
+    # Keep only a tiny safety tail. Speech itself is stretched/compressed to
+    # occupy almost the whole assigned section, preventing a long silent gap.
     usable_seconds = max(0.25, target_seconds - 0.08)
+    speed_factor = original_duration / usable_seconds
 
-    speed_factor = (
-        original_duration / usable_seconds
-        if original_duration > usable_seconds
-        else 1.0
-    )
-
-    filters = atempo_filter_for_speed(speed_factor)
+    filters = atempo_filters_for_factor(speed_factor)
     filters.extend([
         f"apad=pad_dur={target_seconds:.3f}",
         f"atrim=duration={target_seconds:.3f}",
@@ -446,6 +499,8 @@ def generate_voice(
 
     raw_main = os.path.join(work_dir, "main_raw.mp3")
     raw_cta = os.path.join(work_dir, "cta_raw.mp3")
+    compact_main = os.path.join(work_dir, "main_compact.mp3")
+    compact_cta = os.path.join(work_dir, "cta_compact.mp3")
     fit_main = os.path.join(work_dir, "main_20.mp3")
     fit_cta = os.path.join(work_dir, "cta_5.mp3")
 
@@ -466,13 +521,18 @@ def generate_voice(
             require_elevenlabs=require_elevenlabs,
         )
 
+        # First remove long dead-air pauses created between sentences. Then
+        # normalize each segment to its exact video section.
+        compact_silence(raw_main, compact_main)
+        compact_silence(raw_cta, compact_cta)
+
         main_timing = fit_audio_to_exact_duration(
-            raw_main,
+            compact_main,
             fit_main,
             MAIN_AUDIO_SECONDS,
         )
         cta_timing = fit_audio_to_exact_duration(
-            raw_cta,
+            compact_cta,
             fit_cta,
             CTA_AUDIO_SECONDS,
         )
@@ -486,6 +546,11 @@ def generate_voice(
             "cta_provider": cta_provider,
             "main_timing": main_timing,
             "cta_timing": cta_timing,
+            "pause_compaction": {
+                "threshold_db": SILENCE_THRESHOLD_DB,
+                "long_pause_seconds": LONG_PAUSE_SECONDS,
+                "kept_pause_seconds": KEPT_PAUSE_SECONDS,
+            },
             "cta_start": 20.0,
             "cta_end": 25.0,
             "final_duration": final_duration,
@@ -497,7 +562,7 @@ def generate_voice(
 
         print(
             f"Voice complete: narration=0-20s, CTA=20-25s | "
-            f"providers={main_provider}/{cta_provider}",
+            f"providers={main_provider}/{cta_provider} | long pauses compressed",
             flush=True,
         )
 
