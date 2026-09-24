@@ -1,9 +1,10 @@
-import os
+import base64
 import json
+import os
 import shutil
 import subprocess
 import tempfile
-import base64
+import time
 
 import requests
 
@@ -32,6 +33,7 @@ PIPER_MODEL = os.getenv(
 MAIN_AUDIO_SECONDS = 20.0
 CTA_AUDIO_SECONDS = 5.0
 FINAL_AUDIO_SECONDS = 25.0
+ELEVENLABS_RETRIES = 3
 
 
 # ============================================================
@@ -147,9 +149,7 @@ def elevenlabs_tts(text, output_path):
         "Content-Type": "application/json",
     }
 
-    params = {
-        "output_format": "mp3_44100_128",
-    }
+    params = {"output_format": "mp3_44100_128"}
 
     payload = {
         "text": text,
@@ -163,46 +163,62 @@ def elevenlabs_tts(text, output_path):
         },
     }
 
-    print(
-        f"ElevenLabs request | voice={VOICE_ID} model={MODEL_ID}",
-        flush=True,
-    )
+    last_error = None
 
-    try:
-        response = requests.post(
-            url,
-            headers=headers,
-            params=params,
-            json=payload,
-            timeout=120,
+    for attempt in range(1, ELEVENLABS_RETRIES + 1):
+        print(
+            f"ElevenLabs request {attempt}/{ELEVENLABS_RETRIES} | "
+            f"voice={VOICE_ID} model={MODEL_ID}",
+            flush=True,
         )
-    except requests.RequestException as exc:
-        raise RuntimeError(
-            f"ElevenLabs connection failed: {exc}"
-        ) from exc
 
-    if response.status_code != 200:
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                params=params,
+                json=payload,
+                timeout=120,
+            )
+        except requests.RequestException as exc:
+            last_error = RuntimeError(f"ElevenLabs connection failed: {exc}")
+            if attempt < ELEVENLABS_RETRIES:
+                time.sleep(2 * attempt)
+                continue
+            raise last_error from exc
+
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                audio_b64 = data.get("audio_base64")
+                if not audio_b64:
+                    raise ValueError("audio_base64 missing")
+                audio_data = base64.b64decode(audio_b64)
+            except Exception as exc:
+                raise RuntimeError(
+                    "ElevenLabs response did not contain valid audio."
+                ) from exc
+
+            with open(output_path, "wb") as file:
+                file.write(audio_data)
+
+            validate_audio(output_path)
+            return output_path
+
         provider_message = response.text[:1500]
-        raise RuntimeError(
+        last_error = RuntimeError(
             f"ElevenLabs HTTP {response.status_code}: {provider_message}"
         )
 
-    try:
-        data = response.json()
-        audio_b64 = data.get("audio_base64")
-        if not audio_b64:
-            raise ValueError("audio_base64 missing")
-        audio_data = base64.b64decode(audio_b64)
-    except Exception as exc:
-        raise RuntimeError(
-            "ElevenLabs response did not contain valid audio."
-        ) from exc
+        # Retry temporary rate/server failures. Quota/auth errors should fail
+        # immediately so the scheduler can retry later instead of wasting time.
+        if response.status_code in {429, 500, 502, 503, 504} and attempt < ELEVENLABS_RETRIES:
+            time.sleep(2 * attempt)
+            continue
 
-    with open(output_path, "wb") as file:
-        file.write(audio_data)
+        raise last_error
 
-    validate_audio(output_path)
-    return output_path
+    raise last_error or RuntimeError("ElevenLabs voice generation failed.")
 
 
 # ============================================================
@@ -214,9 +230,7 @@ def piper_tts(text, output_path):
         raise RuntimeError("Piper executable is not installed.")
 
     if not os.path.exists(PIPER_MODEL):
-        raise RuntimeError(
-            f"Piper model is missing: {PIPER_MODEL}"
-        )
+        raise RuntimeError(f"Piper model is missing: {PIPER_MODEL}")
 
     wav_path = os.path.splitext(output_path)[0] + "_piper.wav"
 
@@ -263,24 +277,27 @@ def piper_tts(text, output_path):
         safe_remove(wav_path)
 
 
-def generate_raw_segment(text, output_path):
+def generate_raw_segment(text, output_path, require_elevenlabs=False):
     """
-    ElevenLabs is primary. Piper is automatic fallback.
-    A bad ElevenLabs key, quota issue, voice issue, or network outage
-    therefore does not stop the daily YouTube automation.
+    Scheduled production Shorts use require_elevenlabs=True, guaranteeing the
+    new scheduled videos use the paid ElevenLabs voice. Other/manual jobs may
+    still use Piper as a safety fallback.
     """
     try:
         if os.getenv("ELEVENLABS_API_KEY"):
             elevenlabs_tts(text, output_path)
             print("Voice provider: ElevenLabs", flush=True)
             return "elevenlabs"
-
     except Exception as exc:
-        print(
-            f"ElevenLabs unavailable; using Piper fallback: {exc}",
-            flush=True,
-        )
+        print(f"ElevenLabs generation error: {exc}", flush=True)
         safe_remove(output_path)
+        if require_elevenlabs:
+            raise
+
+    if require_elevenlabs:
+        raise RuntimeError(
+            "Scheduled production requires ElevenLabs, but ElevenLabs is unavailable."
+        )
 
     piper_tts(text, output_path)
     print("Voice provider: Piper fallback", flush=True)
@@ -305,11 +322,7 @@ def atempo_filter_for_speed(speed_factor):
     return filters
 
 
-def fit_audio_to_exact_duration(
-    input_path,
-    output_path,
-    target_seconds,
-):
+def fit_audio_to_exact_duration(input_path, output_path, target_seconds):
     original_duration = validate_audio(input_path)
     usable_seconds = max(0.25, target_seconds - 0.08)
 
@@ -349,7 +362,6 @@ def fit_audio_to_exact_duration(
     )
 
     final_duration = validate_audio(output_path)
-
     if abs(final_duration - target_seconds) > 0.15:
         raise RuntimeError(
             f"Voice timing failed: expected {target_seconds}s, "
@@ -392,7 +404,6 @@ def join_audio(main_path, cta_path, output_path):
     )
 
     duration = validate_audio(output_path)
-
     if abs(duration - FINAL_AUDIO_SECONDS) > 0.15:
         raise RuntimeError(
             f"Final voice is not 25 seconds: {duration:.3f}s"
@@ -409,6 +420,7 @@ def generate_voice(
     text: str,
     cta_text: str = "",
     output_filename: str = "voice.mp3",
+    require_elevenlabs: bool = False,
 ) -> str:
     if not text or not text.strip():
         raise ValueError("Voice text cannot be empty.")
@@ -430,11 +442,7 @@ def generate_voice(
     os.makedirs(output_dir, exist_ok=True)
 
     metadata_path = os.path.splitext(output_path)[0] + ".json"
-
-    work_dir = tempfile.mkdtemp(
-        prefix="voice_job_",
-        dir=output_dir,
-    )
+    work_dir = tempfile.mkdtemp(prefix="voice_job_", dir=output_dir)
 
     raw_main = os.path.join(work_dir, "main_raw.mp3")
     raw_cta = os.path.join(work_dir, "cta_raw.mp3")
@@ -444,15 +452,18 @@ def generate_voice(
     print("\n===== VOICE GENERATION =====", flush=True)
     print(f"Main script: {clean_text}", flush=True)
     print(f"CTA: {clean_cta}", flush=True)
+    print(f"Require ElevenLabs: {require_elevenlabs}", flush=True)
 
     try:
         main_provider = generate_raw_segment(
             clean_text,
             raw_main,
+            require_elevenlabs=require_elevenlabs,
         )
         cta_provider = generate_raw_segment(
             clean_cta,
             raw_cta,
+            require_elevenlabs=require_elevenlabs,
         )
 
         main_timing = fit_audio_to_exact_duration(
@@ -466,11 +477,7 @@ def generate_voice(
             CTA_AUDIO_SECONDS,
         )
 
-        final_duration = join_audio(
-            fit_main,
-            fit_cta,
-            output_path,
-        )
+        final_duration = join_audio(fit_main, fit_cta, output_path)
 
         metadata = {
             "main_text": clean_text,
@@ -482,18 +489,15 @@ def generate_voice(
             "cta_start": 20.0,
             "cta_end": 25.0,
             "final_duration": final_duration,
+            "require_elevenlabs": require_elevenlabs,
         }
 
         with open(metadata_path, "w", encoding="utf-8") as file:
-            json.dump(
-                metadata,
-                file,
-                indent=2,
-                ensure_ascii=False,
-            )
+            json.dump(metadata, file, indent=2, ensure_ascii=False)
 
         print(
-            "Voice complete: narration=0-20s, CTA=20-25s",
+            f"Voice complete: narration=0-20s, CTA=20-25s | "
+            f"providers={main_provider}/{cta_provider}",
             flush=True,
         )
 
