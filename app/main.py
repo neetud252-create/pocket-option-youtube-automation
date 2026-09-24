@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 import threading
 import time
 import json
@@ -8,19 +9,18 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, redirect, request
-
 from google_auth_oauthlib.flow import Flow
 
 from app.config import YOUTUBE_DESCRIPTION
 from app.content import generate_content
 from app.voice import generate_voice
-from app.video import generate_video
-from app.youtube import (
-    upload_short,
-    schedule_short,
-    get_video_status,
+from app.video import (
+    generate_video,
+    ASSETS_DIR,
+    CTA_SOURCE,
+    RANDOM_VIDEO_FILES,
 )
-
+from app.youtube import upload_short, schedule_short, get_video_status
 from app.telegram import (
     telegram_webhook,
     initialize_telegram,
@@ -30,63 +30,52 @@ from app.telegram import (
 
 
 # ============================================================
-# APP
+# APP / PATHS
 # ============================================================
 
 app = Flask(__name__)
 
-
-# ============================================================
-# PATHS
-# ============================================================
-
 DATA_DIR = "/app/data"
+OUTPUT_DIR = os.path.join(DATA_DIR, "output")
+BUFFER_FILE = os.path.join(DATA_DIR, "buffer_queue.json")
+YOUTUBE_TOKEN_FILE = os.path.join(DATA_DIR, "youtube_token.json")
+PIPER_MODEL_FILE = "/app/voices/en_US-lessac-medium.onnx"
 
-OUTPUT_DIR = os.path.join(
-    DATA_DIR,
-    "output"
-)
-
-os.makedirs(
-    OUTPUT_DIR,
-    exist_ok=True
-)
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 # ============================================================
-# TIMEZONE
+# TIME / SCHEDULER SETTINGS
 # ============================================================
 
-IST = ZoneInfo(
-    "Asia/Kolkata"
-)
-
-
-# ============================================================
-# BUFFER SETTINGS
-# ============================================================
-
-BUFFER_FILE = os.path.join(
-    DATA_DIR,
-    "buffer_queue.json"
-)
-
-BUFFER_LOCK = threading.Lock()
+IST = ZoneInfo("Asia/Kolkata")
 
 BUFFER_TIMES = [
     (10, 0),
     (18, 0),
 ]
 
-BUFFER_CHECK_SECONDS = 20
+# Daily creation time: 10:00 PM IST.
+CREATION_HOUR_IST = 22
+CREATION_MINUTE_IST = 0
 
-# The automated 1-day buffer is filled once each day at/after
-# 11:00 PM IST. A persistent state file prevents a Railway
-# restart from creating the same day's buffer again.
-LAST_11PM_RUN_FILE = os.path.join(
-    DATA_DIR,
-    "last_11pm_buffer_run.json"
-)
+# Recovery behavior:
+# - after 10 PM -> ensure tomorrow 10 AM + 6 PM
+# - after midnight but before 10 AM -> ensure today's 10 AM + 6 PM
+# - after 10 AM but before 6 PM -> ensure today's 6 PM
+# This protects the schedule if Railway or an API was down at 10 PM.
+SCHEDULER_CHECK_SECONDS = 60
+FAILED_RETRY_COOLDOWN_SECONDS = 300
+MIN_SCHEDULE_LEAD_MINUTES = 5
+YOUTUBE_MONITOR_SECONDS = 600
+
+BUFFER_LOCK = threading.Lock()
+JOB_LOCK = threading.Lock()
+THREAD_START_LOCK = threading.Lock()
+BACKGROUND_THREADS_STARTED = False
+
+_last_failed_fill_monotonic = 0.0
 
 
 # ============================================================
@@ -98,11 +87,10 @@ SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
 ]
 
-REDIRECT_URI = (
+PUBLIC_BASE_URL = (
     "https://pocket-option-youtube-automation-production.up.railway.app"
-    "/oauth2callback"
 )
-
+REDIRECT_URI = PUBLIC_BASE_URL + "/oauth2callback"
 oauth_flow = None
 
 
@@ -111,566 +99,412 @@ oauth_flow = None
 # ============================================================
 
 def now_ist():
-
-    return datetime.now(
-        IST
-    )
+    return datetime.now(IST)
 
 
 def iso_now():
-
     return now_ist().isoformat()
 
 
-# ============================================================
-# AUTOMATION STATE
-# ============================================================
-
 def automation_is_enabled():
-
     state = load_automation_state()
+    return bool(state.get("enabled", True))
 
-    return bool(
-        state.get(
-            "enabled",
-            True
-        )
-    )
+
+def safe_remove(path):
+    if not path:
+        return
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as exc:
+        print(f"Cleanup warning for {path}: {exc}", flush=True)
 
 
 # ============================================================
-# BUFFER LOAD
+# BUFFER STORAGE
 # ============================================================
 
 def load_buffer():
-
-    if not os.path.exists(
-        BUFFER_FILE
-    ):
-
-        return {
-            "slots": []
-        }
+    if not os.path.exists(BUFFER_FILE):
+        return {"slots": []}
 
     try:
+        with open(BUFFER_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
 
-        with open(
-            BUFFER_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
+        if not isinstance(data, dict):
+            return {"slots": []}
 
-            data = json.load(
-                file
-            )
-
-        if not isinstance(
-            data,
-            dict
-        ):
-
-            return {
-                "slots": []
-            }
-
-        if "slots" not in data:
-
-            data[
-                "slots"
-            ] = []
+        if not isinstance(data.get("slots"), list):
+            data["slots"] = []
 
         return data
 
-    except Exception as e:
-
-        print(
-            f"Buffer load error: {e}",
-            flush=True
-        )
-
-        return {
-            "slots": []
-        }
+    except Exception as exc:
+        print(f"Buffer load error: {exc}", flush=True)
+        return {"slots": []}
 
 
-# ============================================================
-# BUFFER SAVE
-# ============================================================
+def save_buffer(data):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    temp_file = BUFFER_FILE + ".tmp"
 
-def save_buffer(
-    data
-):
+    with open(temp_file, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
 
-    os.makedirs(
-        DATA_DIR,
-        exist_ok=True
-    )
-
-    temp_file = (
-        BUFFER_FILE
-        + ".tmp"
-    )
-
-    with open(
-        temp_file,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            data,
-            file,
-            indent=2,
-            ensure_ascii=False
-        )
-
-    os.replace(
-        temp_file,
-        BUFFER_FILE
-    )
+    os.replace(temp_file, BUFFER_FILE)
 
 
-# ============================================================
-# CLEAN OLD BUFFER SLOTS
-# ============================================================
-
-def cleanup_old_buffer_slots(
-    data
-):
-
-    cutoff = (
-        now_ist()
-        - timedelta(
-            days=2
-        )
-    )
-
+def cleanup_old_buffer_slots(data):
+    cutoff = now_ist() - timedelta(days=3)
     cleaned = []
 
-    for slot in data.get(
-        "slots",
-        []
-    ):
-
-        publish_at_string = (
-            slot.get(
-                "publish_at"
-            )
-        )
+    for slot in data.get("slots", []):
+        publish_at_string = slot.get("publish_at")
 
         if not publish_at_string:
-
-            cleaned.append(
-                slot
-            )
-
+            cleaned.append(slot)
             continue
 
         try:
-
-            publish_at = (
-                datetime.fromisoformat(
-                    publish_at_string
-                )
-            )
-
+            publish_at = datetime.fromisoformat(publish_at_string)
         except Exception:
-
-            cleaned.append(
-                slot
-            )
-
+            cleaned.append(slot)
             continue
 
         if publish_at >= cutoff:
+            cleaned.append(slot)
 
-            cleaned.append(
-                slot
-            )
-
-    data[
-        "slots"
-    ] = cleaned
-
+    data["slots"] = cleaned
     return data
 
 
-# ============================================================
-# FIND SLOT
-# ============================================================
-
-def find_slot(
-    data,
-    publish_at
-):
-
+def find_slot(data, publish_at):
     target = publish_at.isoformat()
-
-    for slot in data.get(
-        "slots",
-        []
-    ):
-
-        if slot.get(
-            "publish_at"
-        ) == target:
-
+    for slot in data.get("slots", []):
+        if slot.get("publish_at") == target:
             return slot
-
     return None
 
 
-# ============================================================
-# TOMORROW SLOTS
-# ============================================================
-
-def get_tomorrow_slots():
-
-    tomorrow = (
-        now_ist().date()
-        + timedelta(
-            days=1
-        )
-    )
-
-    slots = []
-
-    for hour, minute in BUFFER_TIMES:
-
-        publish_at = datetime(
-            tomorrow.year,
-            tomorrow.month,
-            tomorrow.day,
+def get_slots_for_date(target_date):
+    return [
+        datetime(
+            target_date.year,
+            target_date.month,
+            target_date.day,
             hour,
             minute,
-            tzinfo=IST
+            tzinfo=IST,
+        )
+        for hour, minute in BUFFER_TIMES
+    ]
+
+
+def get_tomorrow_slots():
+    return get_slots_for_date(now_ist().date() + timedelta(days=1))
+
+
+def get_required_scheduler_slots(current_time=None):
+    """
+    Return only the publish slots that should exist right now.
+
+    Normal run:
+      22:00-23:59 -> tomorrow 10:00 and 18:00.
+
+    Recovery:
+      00:00-09:59 -> today 10:00 and 18:00.
+      10:00-17:59 -> today 18:00.
+      18:00-21:59 -> nothing left today; wait for 22:00.
+    """
+    current_time = current_time or now_ist()
+    today = current_time.date()
+
+    if current_time.hour >= CREATION_HOUR_IST:
+        candidates = get_slots_for_date(today + timedelta(days=1))
+    elif current_time.hour < 10:
+        candidates = get_slots_for_date(today)
+    elif current_time.hour < 18:
+        candidates = [
+            datetime(
+                today.year,
+                today.month,
+                today.day,
+                18,
+                0,
+                tzinfo=IST,
+            )
+        ]
+    else:
+        candidates = []
+
+    minimum_publish_time = current_time + timedelta(
+        minutes=MIN_SCHEDULE_LEAD_MINUTES
+    )
+
+    return [
+        slot for slot in candidates
+        if slot > minimum_publish_time
+    ]
+
+
+def missing_slots(slots, data=None):
+    data = data or load_buffer()
+    return [
+        slot for slot in slots
+        if find_slot(data, slot) is None
+    ]
+
+
+# ============================================================
+# PREFLIGHT
+# ============================================================
+
+def preflight_status():
+    available_clips = [
+        filename
+        for filename in RANDOM_VIDEO_FILES
+        if os.path.exists(os.path.join(ASSETS_DIR, filename))
+    ]
+
+    return {
+        "youtube_token": os.path.exists(YOUTUBE_TOKEN_FILE),
+        "cta_video": os.path.exists(CTA_SOURCE),
+        "normal_clips_found": len(available_clips),
+        "normal_clips_required": 4,
+        "piper_model": os.path.exists(PIPER_MODEL_FILE),
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "ffprobe": shutil.which("ffprobe") is not None,
+        "piper": shutil.which("piper") is not None,
+        "gemini_key_present": bool(os.getenv("GEMINI_API_KEY")),
+        "elevenlabs_key_present": bool(os.getenv("ELEVENLABS_API_KEY")),
+    }
+
+
+def ensure_preflight_ready():
+    status = preflight_status()
+    critical_failures = []
+
+    if not status["youtube_token"]:
+        critical_failures.append("YouTube token is missing")
+
+    if not status["cta_video"]:
+        critical_failures.append("activation_cta.mp4 is missing")
+
+    if status["normal_clips_found"] < status["normal_clips_required"]:
+        critical_failures.append(
+            f"Only {status['normal_clips_found']} normal clips are available"
         )
 
-        slots.append(
-            publish_at
+    if not status["ffmpeg"]:
+        critical_failures.append("ffmpeg is missing")
+
+    if not status["ffprobe"]:
+        critical_failures.append("ffprobe is missing")
+
+    if not status["piper_model"] or not status["piper"]:
+        critical_failures.append("Piper fallback voice is unavailable")
+
+    if critical_failures:
+        raise RuntimeError(
+            "Preflight failed: " + "; ".join(critical_failures)
         )
 
-    return slots
+    return status
 
 
 # ============================================================
 # CREATE + SCHEDULE SHORT
 # ============================================================
 
-def create_and_schedule_short(
-    publish_at,
-    reason="BUFFER"
-):
-
-    print(
-        f"[{reason}] Creating Short for "
-        f"{publish_at.isoformat()}",
-        flush=True
-    )
-
-    # --------------------------------------------------------
-    # CHECK AUTOMATION
-    # --------------------------------------------------------
-
+def create_and_schedule_short(publish_at, reason="BUFFER"):
     if not automation_is_enabled():
-
-        print(
-            "Automation is PAUSED. "
-            "Skipping video creation.",
-            flush=True
-        )
-
+        print("Automation is PAUSED. Skipping video creation.", flush=True)
         return None
 
+    if publish_at.tzinfo is None:
+        raise ValueError("publish_at must contain timezone information.")
 
-    # --------------------------------------------------------
-    # GENERATE CONTENT
-    # --------------------------------------------------------
+    if publish_at <= now_ist() + timedelta(minutes=MIN_SCHEDULE_LEAD_MINUTES):
+        raise RuntimeError(
+            f"Publish time is too close or already passed: {publish_at.isoformat()}"
+        )
 
-    title, script = (
-        generate_content()
-    )
+    ensure_preflight_ready()
 
     print(
-        f"[{reason}] Title: {title}",
-        flush=True
+        f"[{reason}] Creating Short for {publish_at.isoformat()}",
+        flush=True,
     )
 
-
-    # --------------------------------------------------------
-    # CTA
-    # --------------------------------------------------------
+    title, script = generate_content()
+    print(f"[{reason}] Title: {title}", flush=True)
 
     cta_text = (
-        "Go to my channel description "
-        "and click the Bot Activation button."
+        "Go to my channel description and click the Bot Activation button."
     )
+    short_amount = random.randint(1000, 2000)
 
-
-    # --------------------------------------------------------
-    # RANDOM DEMO AMOUNT
-    # --------------------------------------------------------
-
-    short_amount = random.randint(
-        1000,
-        2000
-    )
-
-
-    # --------------------------------------------------------
-    # GENERATE VOICE
-    # --------------------------------------------------------
-
-    timestamp = (
-        datetime.now(
-            timezone.utc
-        ).strftime(
-            "%Y%m%d_%H%M%S_%f"
-        )
-    )
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    unique_name = f"{publish_at.strftime('%Y%m%d_%H%M')}_{timestamp}"
 
     voice_path = os.path.join(
         OUTPUT_DIR,
-        f"voice_{timestamp}.mp3"
+        f"voice_{unique_name}.mp3",
     )
+    video_filename = f"short_{unique_name}.mp4"
+    video_path = None
 
-    generate_voice(
-        script,
-        cta_text,
-        voice_path
-    )
+    try:
+        generate_voice(
+            script,
+            cta_text,
+            voice_path,
+        )
 
+        video_path = generate_video(
+            script=script,
+            voice_path=voice_path,
+            short_amount=short_amount,
+            output_filename=video_filename,
+        )
 
-    # --------------------------------------------------------
-    # GENERATE VIDEO
-    # --------------------------------------------------------
+        video_id = schedule_short(
+            video_path=video_path,
+            title=title,
+            description=YOUTUBE_DESCRIPTION,
+            publish_at=publish_at,
+        )
 
-    video_path = generate_video(
-        script=script,
-        voice_path=voice_path,
-        short_amount=short_amount
-    )
+        record = {
+            "title": title,
+            "script": script,
+            "video_id": video_id,
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "publish_at": publish_at.isoformat(),
+            "privacy_status": "private",
+            "status": "scheduled",
+            "created_at": iso_now(),
+            "reason": reason,
+            "demo_amount": short_amount,
+        }
 
+        print(
+            f"[{reason}] Scheduled successfully: {video_id}",
+            flush=True,
+        )
+        return record
 
-    # --------------------------------------------------------
-    # SCHEDULE ON YOUTUBE
-    # --------------------------------------------------------
-
-    video_id = schedule_short(
-        video_path=video_path,
-        title=title,
-        description=YOUTUBE_DESCRIPTION,
-        publish_at=publish_at
-    )
-
-
-    # --------------------------------------------------------
-    # RESULT
-    # --------------------------------------------------------
-
-    record = {
-
-        "title": title,
-
-        "script": script,
-
-        "video_path": video_path,
-
-        "video_id": video_id,
-
-        "url":
-            f"https://www.youtube.com/watch?v={video_id}",
-
-        "publish_at":
-            publish_at.isoformat(),
-
-        "privacy_status":
-            "private",
-
-        "status":
-            "scheduled",
-
-        "created_at":
-            iso_now(),
-
-        "reason":
-            reason,
-    }
-
-
-    print(
-        f"[{reason}] Scheduled successfully: "
-        f"{video_id}",
-        flush=True
-    )
-
-    return record
+    finally:
+        safe_remove(voice_path)
+        safe_remove(os.path.splitext(voice_path)[0] + ".json")
+        safe_remove(video_path)
 
 
 # ============================================================
-# FILL TOMORROW BUFFER
+# BUFFER FILL
 # ============================================================
 
-def fill_tomorrow_buffer():
+def fill_slots(target_slots, reason="BUFFER"):
+    if not target_slots:
+        return {"created": 0, "existing": 0, "failed": 0}
 
-    with BUFFER_LOCK:
+    if not JOB_LOCK.acquire(blocking=False):
+        print(f"{reason}: another video job is already running.", flush=True)
+        return {"busy": True}
 
+    try:
         if not automation_is_enabled():
+            print(f"{reason}: automation is paused.", flush=True)
+            return {"paused": True}
 
-            print(
-                "BUFFER: automation paused; "
-                "no new videos will be created.",
-                flush=True
-            )
+        with BUFFER_LOCK:
+            data = cleanup_old_buffer_slots(load_buffer())
+            save_buffer(data)
 
-            return
+        created = 0
+        existing_count = 0
+        failed = 0
 
-
-        data = load_buffer()
-
-        data = cleanup_old_buffer_slots(
-            data
-        )
-
-        tomorrow_slots = (
-            get_tomorrow_slots()
-        )
-
-
-        for publish_at in tomorrow_slots:
-
-            # ----------------------------------------------
-            # CHECK AGAIN BEFORE EACH VIDEO
-            # ----------------------------------------------
-
+        for publish_at in target_slots:
             if not automation_is_enabled():
-
-                print(
-                    "BUFFER: automation paused "
-                    "during buffer fill.",
-                    flush=True
-                )
-
+                print(f"{reason}: automation paused during fill.", flush=True)
                 break
 
-
-            existing = find_slot(
-                data,
-                publish_at
-            )
-
-            if existing:
-
+            if publish_at <= now_ist() + timedelta(
+                minutes=MIN_SCHEDULE_LEAD_MINUTES
+            ):
                 print(
-                    "BUFFER: slot already exists:",
-                    publish_at.isoformat(),
-                    flush=True
+                    f"{reason}: skipping past/too-close slot "
+                    f"{publish_at.isoformat()}",
+                    flush=True,
                 )
-
                 continue
 
+            with BUFFER_LOCK:
+                data = cleanup_old_buffer_slots(load_buffer())
+                existing = find_slot(data, publish_at)
 
-            # ----------------------------------------------
-            # CREATE VIDEO
-            # ----------------------------------------------
+            if existing:
+                existing_count += 1
+                print(
+                    f"{reason}: slot already exists: {publish_at.isoformat()}",
+                    flush=True,
+                )
+                continue
 
             try:
-
-                record = (
-                    create_and_schedule_short(
-                        publish_at,
-                        reason="BUFFER"
-                    )
+                record = create_and_schedule_short(
+                    publish_at,
+                    reason=reason,
                 )
 
                 if record:
+                    with BUFFER_LOCK:
+                        data = cleanup_old_buffer_slots(load_buffer())
 
-                    data[
-                        "slots"
-                    ].append(
-                        record
-                    )
+                        if not find_slot(data, publish_at):
+                            data["slots"].append(record)
+                            save_buffer(data)
 
-                    save_buffer(
-                        data
-                    )
+                    created += 1
 
-            except Exception as e:
-
+            except Exception as exc:
+                failed += 1
                 print(
-                    "BUFFER ERROR:",
-                    repr(e),
-                    flush=True
+                    f"{reason} ERROR for {publish_at.isoformat()}: {repr(exc)}",
+                    flush=True,
                 )
-
-                record_error(
-                    e
-                )
-
-                # Continue to next slot
-                continue
-
-
-        save_buffer(
-            data
-        )
+                record_error(exc)
 
         print(
-            "BUFFER CHECK COMPLETE",
-            flush=True
+            f"{reason} COMPLETE | created={created} "
+            f"existing={existing_count} failed={failed}",
+            flush=True,
         )
 
-        print(
-            json.dumps(
-                data,
-                indent=2,
-                ensure_ascii=False
-            ),
-            flush=True
-        )
+        return {
+            "created": created,
+            "existing": existing_count,
+            "failed": failed,
+        }
+
+    finally:
+        JOB_LOCK.release()
 
 
-# ============================================================
-# BUFFER BACKGROUND
-# ============================================================
-
-def run_buffer_background(
-    reason="BUFFER"
-):
-
+def run_buffer_background(target_slots, reason="BUFFER"):
     def worker():
-
         try:
+            print(f"{reason}: starting", flush=True)
+            fill_slots(target_slots, reason=reason)
+            print(f"{reason}: finished", flush=True)
+        except Exception as exc:
+            print(f"{reason} ERROR: {repr(exc)}", flush=True)
+            record_error(exc)
 
-            print(
-                f"{reason}: starting",
-                flush=True
-            )
-
-            fill_tomorrow_buffer()
-
-            print(
-                f"{reason}: finished",
-                flush=True
-            )
-
-        except Exception as e:
-
-            print(
-                f"{reason} ERROR:",
-                repr(e),
-                flush=True
-            )
-
-            record_error(
-                e
-            )
-
-    thread = threading.Thread(
-        target=worker,
-        daemon=True
-    )
-
+    thread = threading.Thread(target=worker, daemon=True)
     thread.start()
 
 
@@ -679,585 +513,219 @@ def run_buffer_background(
 # ============================================================
 
 def create_and_upload_short():
+    ensure_preflight_ready()
 
-    print(
-        "MANUAL TEST: creating Short",
-        flush=True
-    )
-
-
-    # --------------------------------------------------------
-    # GENERATE CONTENT
-    # --------------------------------------------------------
-
-    title, script = (
-        generate_content()
-    )
-
-
-    # --------------------------------------------------------
-    # CTA
-    # --------------------------------------------------------
+    title, script = generate_content()
 
     cta_text = (
-        "Go to my channel description "
-        "and click the Bot Activation button."
+        "Go to my channel description and click the Bot Activation button."
     )
+    short_amount = random.randint(1000, 2000)
 
-
-    # --------------------------------------------------------
-    # RANDOM AMOUNT
-    # --------------------------------------------------------
-
-    short_amount = random.randint(
-        1000,
-        2000
-    )
-
-
-    # --------------------------------------------------------
-    # VOICE
-    # --------------------------------------------------------
-
-    timestamp = (
-        datetime.now(
-            timezone.utc
-        ).strftime(
-            "%Y%m%d_%H%M%S_%f"
-        )
-    )
-
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     voice_path = os.path.join(
         OUTPUT_DIR,
-        f"test_voice_{timestamp}.mp3"
+        f"test_voice_{timestamp}.mp3",
     )
+    video_path = None
+
+    try:
+        generate_voice(
+            script,
+            cta_text,
+            voice_path,
+        )
+
+        video_path = generate_video(
+            script=script,
+            voice_path=voice_path,
+            short_amount=short_amount,
+            output_filename=f"test_short_{timestamp}.mp4",
+        )
+
+        video_id = upload_short(
+            video_path=video_path,
+            title=title,
+            description=YOUTUBE_DESCRIPTION,
+        )
+
+        result = {
+            "title": title,
+            "video_id": video_id,
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "privacy_status": "unlisted",
+            "created_at": iso_now(),
+        }
+
+        print(
+            "MANUAL TEST COMPLETE: "
+            + json.dumps(result, indent=2),
+            flush=True,
+        )
+        return result
+
+    finally:
+        safe_remove(voice_path)
+        safe_remove(os.path.splitext(voice_path)[0] + ".json")
+        safe_remove(video_path)
 
 
-    generate_voice(
-        script,
-        cta_text,
-        voice_path
-    )
-
-
-    # --------------------------------------------------------
-    # VIDEO
-    # --------------------------------------------------------
-
-    video_path = generate_video(
-        script=script,
-        voice_path=voice_path,
-        short_amount=short_amount
-    )
-
-
-    # --------------------------------------------------------
-    # MANUAL UPLOAD = UNLISTED
-    # --------------------------------------------------------
-
-    video_id = upload_short(
-        video_path=video_path,
-        title=title,
-        description=YOUTUBE_DESCRIPTION
-    )
-
-
-    result = {
-
-        "title": title,
-
-        "video_id": video_id,
-
-        "url":
-            f"https://www.youtube.com/watch?v={video_id}",
-
-        "privacy_status":
-            "unlisted",
-
-        "created_at":
-            iso_now(),
-    }
-
-
-    print(
-        "MANUAL TEST COMPLETE:",
-        json.dumps(
-            result,
-            indent=2
-        ),
-        flush=True
-    )
-
-    return result
-
-
-# ============================================================
-# MANUAL TEST BACKGROUND
-# ============================================================
-
-def run_short_background(
-    reason="MANUAL TEST"
-):
-
+def run_short_background(reason="MANUAL TEST"):
     def worker():
+        if not JOB_LOCK.acquire(blocking=False):
+            print(f"{reason}: another video job is already running.", flush=True)
+            return
 
         try:
-
-            print(
-                f"{reason}: started",
-                flush=True
-            )
-
+            print(f"{reason}: started", flush=True)
             create_and_upload_short()
+            print(f"{reason}: finished", flush=True)
+        except Exception as exc:
+            print(f"{reason} ERROR: {repr(exc)}", flush=True)
+            record_error(exc)
+        finally:
+            JOB_LOCK.release()
 
-            print(
-                f"{reason}: finished",
-                flush=True
-            )
-
-        except Exception as e:
-
-            print(
-                f"{reason} ERROR:",
-                repr(e),
-                flush=True
-            )
-
-            record_error(
-                e
-            )
-
-    thread = threading.Thread(
-        target=worker,
-        daemon=True
-    )
-
+    thread = threading.Thread(target=worker, daemon=True)
     thread.start()
 
 
 # ============================================================
-# UPDATE YOUTUBE STATUSES
+# YOUTUBE STATUS MONITOR
 # ============================================================
 
 def update_buffer_video_statuses():
-
-    data = load_buffer()
+    with BUFFER_LOCK:
+        data = cleanup_old_buffer_slots(load_buffer())
 
     changed = False
 
-    for slot in data.get(
-        "slots",
-        []
-    ):
+    for slot in data.get("slots", []):
+        video_id = slot.get("video_id")
 
-        video_id = slot.get(
-            "video_id"
-        )
-
-        if not video_id:
-
+        if not video_id or not isinstance(video_id, str):
             continue
 
         try:
-
-            status = get_video_status(
-                video_id
-            )
-
+            status = get_video_status(video_id)
             if not status:
-
                 continue
 
+            old_status = slot.get("status")
+            privacy_status = status.get("privacy_status")
+            published_at = status.get("published_at")
+            upload_status = status.get("upload_status")
+            processing_status = status.get("processing_status")
 
-            old_status = slot.get(
-                "status"
-            )
-
-
-            # ------------------------------------------------
-            # SCHEDULED / PUBLISHED
-            # ------------------------------------------------
-
-            privacy_status = (
-                status.get(
-                    "privacy_status"
-                )
-            )
-
-            published_at = (
-                status.get(
-                    "published_at"
-                )
-            )
-
-            upload_status = (
-                status.get(
-                    "upload_status"
-                )
-            )
-
-            processing_status = (
-                status.get(
-                    "processing_status"
-                )
-            )
-
-
-            if published_at:
-
-                slot[
-                    "status"
-                ] = "published"
-
-                slot[
-                    "published_at"
-                ] = published_at
-
+            if published_at and privacy_status == "public":
+                slot["status"] = "published"
+                slot["published_at"] = published_at
             elif privacy_status == "private":
-
-                slot[
-                    "status"
-                ] = "scheduled"
-
+                slot["status"] = "scheduled"
             elif upload_status == "failed":
-
-                slot[
-                    "status"
-                ] = "failed"
-
+                slot["status"] = "failed"
             else:
-
-                slot[
-                    "status"
-                ] = (
+                slot["status"] = (
                     processing_status
-                    or
-                    privacy_status
-                    or
-                    "unknown"
+                    or privacy_status
+                    or "unknown"
                 )
 
+            slot["youtube_status"] = status
 
-            slot[
-                "youtube_status"
-            ] = status
-
-
-            if slot.get(
-                "status"
-            ) != old_status:
-
+            if slot.get("status") != old_status:
                 changed = True
 
-
-        except Exception as e:
-
+        except Exception as exc:
             print(
-                f"YouTube status check error "
-                f"for {video_id}: {e}",
-                flush=True
+                f"YouTube status check error for {video_id}: {exc}",
+                flush=True,
             )
-
-            record_error(
-                e
-            )
-
+            record_error(exc)
 
     if changed:
+        with BUFFER_LOCK:
+            save_buffer(data)
 
-        save_buffer(
-            data
-        )
-
-
-# ============================================================
-# YOUTUBE MONITOR
-# ============================================================
 
 def youtube_monitor_loop():
-
-    print(
-        "YouTube monitor started.",
-        flush=True
-    )
+    print("YouTube monitor started.", flush=True)
 
     while True:
-
         try:
-
             update_buffer_video_statuses()
+        except Exception as exc:
+            print(f"YouTube monitor error: {repr(exc)}", flush=True)
+            record_error(exc)
 
-        except Exception as e:
-
-            print(
-                "YouTube monitor error:",
-                repr(e),
-                flush=True
-            )
-
-            record_error(
-                e
-            )
-
-        time.sleep(
-            60
-        )
+        time.sleep(YOUTUBE_MONITOR_SECONDS)
 
 
 # ============================================================
-# 11 PM BUFFER STATE
-# ============================================================
-
-def load_last_11pm_run_date():
-
-    if not os.path.exists(
-        LAST_11PM_RUN_FILE
-    ):
-
-        return None
-
-    try:
-
-        with open(
-            LAST_11PM_RUN_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            data = json.load(
-                file
-            )
-
-        return data.get(
-            "date"
-        )
-
-    except Exception as e:
-
-        print(
-            f"11 PM state load error: {e}",
-            flush=True
-        )
-
-        return None
-
-
-def save_last_11pm_run_date(
-    run_date
-):
-
-    os.makedirs(
-        DATA_DIR,
-        exist_ok=True
-    )
-
-    temp_file = (
-        LAST_11PM_RUN_FILE
-        + ".tmp"
-    )
-
-    with open(
-        temp_file,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            {
-                "date": run_date,
-                "saved_at": iso_now()
-            },
-            file,
-            indent=2
-        )
-
-    os.replace(
-        temp_file,
-        LAST_11PM_RUN_FILE
-    )
-
-
-def tomorrow_buffer_is_complete():
-
-    data = load_buffer()
-
-    tomorrow_slots = (
-        get_tomorrow_slots()
-    )
-
-    for publish_at in tomorrow_slots:
-
-        if not find_slot(
-            data,
-            publish_at
-        ):
-
-            return False
-
-    return True
-
-
-# ============================================================
-# SCHEDULER
+# ROBUST 10 PM SCHEDULER + CATCH-UP
 # ============================================================
 
 def scheduler_loop():
+    global _last_failed_fill_monotonic
 
+    print("10 PM buffer scheduler started.", flush=True)
     print(
-        "11 PM buffer scheduler started.",
-        flush=True
+        "Automatic creation time: 10:00 PM IST | "
+        "Publish times: 10:00 AM and 6:00 PM IST",
+        flush=True,
     )
-
     print(
-        "Automatic buffer creation time: "
-        "11:00 PM IST",
-        flush=True
+        "Recovery mode is enabled for Railway/API outages.",
+        flush=True,
     )
-
-    # --------------------------------------------------------
-    # IMPORTANT:
-    # There is NO startup buffer fill here.
-    #
-    # The service waits until 11:00 PM IST.
-    # If Railway restarts after 11 PM, the scheduler will
-    # catch up automatically because it checks whether today's
-    # 11 PM run has already been completed.
-    # --------------------------------------------------------
 
     while True:
-
         try:
-
             current_time = now_ist()
 
-            current_date = (
-                current_time.date()
-            )
-
-            last_run_date = (
-                load_last_11pm_run_date()
-            )
-
-            after_11pm = (
-                current_time.hour >= 23
-            )
-
             if not automation_is_enabled():
+                time.sleep(SCHEDULER_CHECK_SECONDS)
+                continue
 
-                print(
-                    "Scheduler: automation paused.",
-                    flush=True
+            target_slots = get_required_scheduler_slots(current_time)
+            missing = missing_slots(target_slots)
+
+            if missing:
+                since_last_failure = (
+                    time.monotonic() - _last_failed_fill_monotonic
                 )
 
-            elif after_11pm:
-
-                current_date_string = (
-                    current_date.isoformat()
-                )
-
-                if last_run_date != current_date_string:
-
+                if (
+                    _last_failed_fill_monotonic == 0.0
+                    or since_last_failure >= FAILED_RETRY_COOLDOWN_SECONDS
+                ):
                     print(
-                        "==================================================",
-                        flush=True
+                        "Scheduler found missing required slots: "
+                        + ", ".join(slot.isoformat() for slot in missing),
+                        flush=True,
                     )
 
-                    print(
-                        "11 PM IST BUFFER RUN STARTING",
-                        flush=True
+                    result = fill_slots(
+                        missing,
+                        reason="AUTO BUFFER",
                     )
 
-                    print(
-                        f"Current IST time: "
-                        f"{current_time.isoformat()}",
-                        flush=True
-                    )
-
-                    print(
-                        "Creating tomorrow's "
-                        "10:00 AM and 6:00 PM Shorts.",
-                        flush=True
-                    )
-
-                    print(
-                        "==================================================",
-                        flush=True
-                    )
-
-                    # Run synchronously inside the scheduler
-                    # thread. This prevents multiple 11 PM
-                    # buffer-fill workers from being started at
-                    # the same time.
-                    #
-                    # fill_tomorrow_buffer() already checks each
-                    # exact publish time and skips slots that
-                    # already exist.
-
-                    fill_tomorrow_buffer()
-
-                    # Only mark today's 11 PM run complete when
-                    # BOTH tomorrow slots actually exist.
-                    #
-                    # If one video failed, the scheduler will
-                    # retry on the next 20-second check instead
-                    # of waiting another full day.
-
-                    if tomorrow_buffer_is_complete():
-
-                        save_last_11pm_run_date(
-                            current_date_string
-                        )
-
+                    if result.get("failed", 0) > 0:
+                        _last_failed_fill_monotonic = time.monotonic()
                         print(
-                            "11 PM BUFFER RUN COMPLETE.",
-                            flush=True
+                            "Automatic fill had an error. "
+                            "Retrying after 5 minutes.",
+                            flush=True,
                         )
-
-                        print(
-                            "Tomorrow's 10:00 AM and "
-                            "6:00 PM slots are ready.",
-                            flush=True
-                        )
-
                     else:
+                        _last_failed_fill_monotonic = 0.0
 
-                        print(
-                            "11 PM BUFFER RUN INCOMPLETE.",
-                            flush=True
-                        )
+        except Exception as exc:
+            _last_failed_fill_monotonic = time.monotonic()
+            print(f"Scheduler error: {repr(exc)}", flush=True)
+            record_error(exc)
 
-                        print(
-                            "At least one tomorrow slot "
-                            "is missing. Scheduler will retry.",
-                            flush=True
-                        )
-
-                else:
-
-                    # Today's 11 PM run has already completed.
-                    # Do nothing until tomorrow at 11 PM.
-
-                    pass
-
-            # Before 11 PM, do absolutely nothing.
-            # This is what prevents the old continuous buffer
-            # generation behavior.
-
-        except Exception as e:
-
-            print(
-                "Scheduler error:",
-                repr(e),
-                flush=True
-            )
-
-            record_error(
-                e
-            )
-
-        time.sleep(
-            BUFFER_CHECK_SECONDS
-        )
+        time.sleep(SCHEDULER_CHECK_SECONDS)
 
 
 # ============================================================
@@ -1265,536 +733,298 @@ def scheduler_loop():
 # ============================================================
 
 def heartbeat_loop():
-
-    print(
-        "Heartbeat started.",
-        flush=True
-    )
+    print("Heartbeat started.", flush=True)
 
     while True:
-
         try:
-
             state = load_automation_state()
-
-            status = (
-                "LIVE"
-                if state.get(
-                    "enabled",
-                    True
-                )
-                else
-                "PAUSED"
-            )
-
+            status = "LIVE" if state.get("enabled", True) else "PAUSED"
+            required = get_required_scheduler_slots(now_ist())
+            missing = missing_slots(required)
             print(
-                f"HEARTBEAT | "
-                f"{iso_now()} | "
-                f"AUTOMATION={status}",
-                flush=True
+                f"HEARTBEAT | {iso_now()} | AUTOMATION={status} | "
+                f"missing_required_slots={len(missing)}",
+                flush=True,
             )
+        except Exception as exc:
+            print(f"Heartbeat error: {repr(exc)}", flush=True)
 
-        except Exception as e:
-
-            print(
-                "Heartbeat error:",
-                repr(e),
-                flush=True
-            )
-
-        time.sleep(
-            300
-        )
+        time.sleep(300)
 
 
 # ============================================================
-# TELEGRAM WEBHOOK ROUTE
+# ROUTES
 # ============================================================
 
-@app.route(
-    "/telegram/webhook/<secret>",
-    methods=["POST"]
-)
-def telegram_webhook_route(
-    secret
-):
-
+@app.route("/telegram/webhook/<secret>", methods=["POST"])
+def telegram_webhook_route(secret):
     expected_secret = os.getenv(
         "TELEGRAM_WEBHOOK_SECRET",
-        "pocket-option-telegram-secure"
+        "pocket-option-telegram-secure",
     )
-
 
     if secret != expected_secret:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 403
 
-        return jsonify({
-            "ok": False,
-            "error": "Unauthorized"
-        }), 403
+    return jsonify(telegram_webhook(request))
 
 
-    return jsonify(
-        telegram_webhook(
-            request
-        )
-    )
-
-
-# ============================================================
-# HOME
-# ============================================================
-
-@app.route(
-    "/",
-    methods=["GET"]
-)
+@app.route("/", methods=["GET"])
 def home():
-
     state = load_automation_state()
-
     buffer_data = load_buffer()
 
     return jsonify({
-
-        "service":
-            "Pocket Option YouTube Automation",
-
-        "status":
-            "running",
-
-        "automation":
-            (
-                "LIVE"
-                if state.get(
-                    "enabled",
-                    True
-                )
-                else
-                "PAUSED"
-            ),
-
-        "buffer_mode":
-            "1-day advance buffer",
-
-        "scheduled_times":
-            [
-                "10:00 IST",
-                "18:00 IST"
-            ],
-
-        "automated_privacy":
-            "private + scheduled publishAt",
-
-        "manual_test_privacy":
-            "unlisted",
-
-        "buffer_slots":
-            len(
-                buffer_data.get(
-                    "slots",
-                    []
-                )
-            ),
-
-        "telegram":
-            bool(
-                os.getenv(
-                    "TELEGRAM_BOT_TOKEN"
-                )
-                and
-                os.getenv(
-                    "TELEGRAM_ADMIN_CHAT_ID"
-                )
-            )
+        "service": "Pocket Option YouTube Automation",
+        "status": "running",
+        "automation": (
+            "LIVE" if state.get("enabled", True) else "PAUSED"
+        ),
+        "creation_time": "22:00 IST",
+        "publish_times": ["10:00 IST", "18:00 IST"],
+        "buffer_mode": "1-day advance + outage catch-up",
+        "automated_privacy": "private + scheduled publishAt",
+        "manual_test_privacy": "unlisted",
+        "buffer_slots": len(buffer_data.get("slots", [])),
+        "telegram": bool(
+            os.getenv("TELEGRAM_BOT_TOKEN")
+            and os.getenv("TELEGRAM_ADMIN_CHAT_ID")
+        ),
     })
 
 
-# ============================================================
-# HEALTH
-# ============================================================
-
-@app.route(
-    "/health",
-    methods=["GET"]
-)
+@app.route("/health", methods=["GET"])
 def health():
-
     state = load_automation_state()
+    required = get_required_scheduler_slots(now_ist())
+    data = load_buffer()
+    missing = missing_slots(required, data)
+    preflight = preflight_status()
 
-    return jsonify({
-
-        "ok":
-            True,
-
-        "service":
-            "youtube-automation",
-
-        "automation":
-            (
-                "LIVE"
-                if state.get(
-                    "enabled",
-                    True
-                )
-                else
-                "PAUSED"
-            ),
-
-        "youtube_token":
-            os.path.exists(
-                "/app/data/youtube_token.json"
-            ),
-
-        "gemini_key":
-            bool(
-                os.getenv(
-                    "GEMINI_API_KEY"
-                )
-            ),
-
-        "elevenlabs_key":
-            bool(
-                os.getenv(
-                    "ELEVENLABS_API_KEY"
-                )
-            ),
-
-        "telegram":
-            bool(
-                os.getenv(
-                    "TELEGRAM_BOT_TOKEN"
-                )
-                and
-                os.getenv(
-                    "TELEGRAM_ADMIN_CHAT_ID"
-                )
-            ),
-
-        "time":
-            iso_now()
-    })
-
-
-# ============================================================
-# BUFFER ENDPOINT
-# ============================================================
-
-@app.route(
-    "/buffer",
-    methods=["GET"]
-)
-def buffer_endpoint():
-
-    return jsonify(
-        load_buffer()
+    internal_ready = (
+        preflight["cta_video"]
+        and preflight["normal_clips_found"] >= 4
+        and preflight["piper_model"]
+        and preflight["ffmpeg"]
+        and preflight["ffprobe"]
+        and preflight["piper"]
     )
 
+    return jsonify({
+        "ok": internal_ready,
+        "service": "youtube-automation",
+        "automation": (
+            "LIVE" if state.get("enabled", True) else "PAUSED"
+        ),
+        "creation_time": "22:00 IST",
+        "publish_times": ["10:00 IST", "18:00 IST"],
+        "recovery_mode": True,
+        "youtube_token": preflight["youtube_token"],
+        "gemini_key_present": preflight["gemini_key_present"],
+        "elevenlabs_key_present": preflight["elevenlabs_key_present"],
+        "piper_fallback_ready": (
+            preflight["piper_model"] and preflight["piper"]
+        ),
+        "cta_video_ready": preflight["cta_video"],
+        "normal_clips_found": preflight["normal_clips_found"],
+        "internal_runtime_ready": internal_ready,
+        "required_slots_now": [
+            slot.isoformat() for slot in required
+        ],
+        "missing_required_slots": [
+            slot.isoformat() for slot in missing
+        ],
+        "time": iso_now(),
+    })
 
-# ============================================================
-# FILL BUFFER ENDPOINT
-# ============================================================
 
-@app.route(
-    "/fill-buffer",
-    methods=["GET"]
-)
+@app.route("/buffer", methods=["GET"])
+def buffer_endpoint():
+    return jsonify(load_buffer())
+
+
+@app.route("/fill-buffer", methods=["GET"])
 def fill_buffer_endpoint():
-
     if not automation_is_enabled():
-
         return jsonify({
-
-            "ok":
-                False,
-
-            "message":
-                "Automation is currently paused."
+            "ok": False,
+            "message": "Automation is currently paused.",
         })
 
-
+    slots = get_tomorrow_slots()
     run_buffer_background(
-        "MANUAL BUFFER FILL"
+        slots,
+        "MANUAL TOMORROW BUFFER FILL",
     )
 
     return jsonify({
-
-        "ok":
-            True,
-
-        "message":
-            "Buffer check started."
+        "ok": True,
+        "message": "Tomorrow buffer check started.",
+        "slots": [slot.isoformat() for slot in slots],
     })
 
 
-# ============================================================
-# MANUAL TEST ENDPOINT
-# ============================================================
+@app.route("/fill-required", methods=["GET"])
+def fill_required_endpoint():
+    if not automation_is_enabled():
+        return jsonify({
+            "ok": False,
+            "message": "Automation is currently paused.",
+        })
 
-@app.route(
-    "/run-test",
-    methods=["GET"]
-)
+    slots = get_required_scheduler_slots(now_ist())
+    run_buffer_background(
+        slots,
+        "MANUAL RECOVERY FILL",
+    )
+
+    return jsonify({
+        "ok": True,
+        "message": "Required-slot recovery check started.",
+        "slots": [slot.isoformat() for slot in slots],
+    })
+
+
+@app.route("/run-test", methods=["GET"])
 def run_test_endpoint():
-
-    run_short_background(
-        "MANUAL TEST"
-    )
-
+    run_short_background("MANUAL TEST")
     return jsonify({
-
-        "ok":
-            True,
-
-        "message":
-            "Manual test started.",
-
-        "privacy":
-            "unlisted"
+        "ok": True,
+        "message": "Manual test started.",
+        "privacy": "unlisted",
     })
 
 
 # ============================================================
-# OAUTH AUTHORIZE
+# YOUTUBE OAUTH
 # ============================================================
 
-@app.route(
-    "/authorize",
-    methods=["GET"]
-)
+@app.route("/authorize", methods=["GET"])
 def authorize():
-
     global oauth_flow
 
-    client_id = os.getenv(
-        "GOOGLE_CLIENT_ID"
-    )
-
-    client_secret = os.getenv(
-        "GOOGLE_CLIENT_SECRET"
-    )
-
+    client_id = os.getenv("YOUTUBE_CLIENT_ID")
+    client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-
         return (
-            "Missing GOOGLE_CLIENT_ID "
-            "or GOOGLE_CLIENT_SECRET.",
-            500
+            "Missing YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_SECRET.",
+            500,
         )
 
-
     client_config = {
-
         "web": {
-
-            "client_id":
-                client_id,
-
-            "client_secret":
-                client_secret,
-
-            "auth_uri":
-                "https://accounts.google.com/o/oauth2/auth",
-
-            "token_uri":
-                "https://oauth2.googleapis.com/token",
-
-            "redirect_uris": [
-                REDIRECT_URI
-            ]
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [REDIRECT_URI],
         }
     }
 
-
-    oauth_flow = (
-        Flow.from_client_config(
-            client_config,
-            scopes=SCOPES,
-            redirect_uri=REDIRECT_URI
-        )
+    oauth_flow = Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI,
     )
 
-
-    authorization_url, state = (
-        oauth_flow.authorization_url(
-            access_type="offline",
-            include_granted_scopes="true",
-            prompt="consent"
-        )
+    authorization_url, _state = oauth_flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
     )
 
-
-    return redirect(
-        authorization_url
-    )
+    return redirect(authorization_url)
 
 
-# ============================================================
-# OAUTH CALLBACK
-# ============================================================
-
-@app.route(
-    "/oauth2callback",
-    methods=["GET"]
-)
+@app.route("/oauth2callback", methods=["GET"])
 def oauth2callback():
-
     global oauth_flow
 
     if oauth_flow is None:
-
         return (
-            "OAuth flow expired. "
-            "Open /authorize again.",
-            400
+            "OAuth flow expired. Open /authorize again.",
+            400,
         )
 
-
     try:
-
         oauth_flow.fetch_token(
             authorization_response=request.url
         )
+        credentials = oauth_flow.credentials
 
-        credentials = (
-            oauth_flow.credentials
-        )
+        os.makedirs(DATA_DIR, exist_ok=True)
+        temp_file = YOUTUBE_TOKEN_FILE + ".tmp"
 
+        with open(temp_file, "w", encoding="utf-8") as file:
+            file.write(credentials.to_json())
 
-        token_path = (
-            "/app/data/youtube_token.json"
-        )
-
-
-        os.makedirs(
-            "/app/data",
-            exist_ok=True
-        )
-
-
-        with open(
-            token_path,
-            "w",
-            encoding="utf-8"
-        ) as file:
-
-            file.write(
-                credentials.to_json()
-            )
-
-
+        os.replace(temp_file, YOUTUBE_TOKEN_FILE)
         oauth_flow = None
 
+        return "YouTube authorization successful. Token saved."
 
-        return (
-            "YouTube authorization successful. "
-            "Token saved."
-        )
-
-
-    except Exception as e:
-
-        print(
-            "OAuth callback error:",
-            repr(e),
-            flush=True
-        )
-
-        record_error(
-            e
-        )
-
-        return (
-            f"OAuth error: {e}",
-            500
-        )
+    except Exception as exc:
+        print(f"OAuth callback error: {repr(exc)}", flush=True)
+        record_error(exc)
+        return f"OAuth error: {exc}", 500
 
 
 # ============================================================
-# START BACKGROUND THREADS
+# BACKGROUND THREADS
 # ============================================================
 
 def start_background_threads():
+    global BACKGROUND_THREADS_STARTED
 
-    # --------------------------------------------------------
-    # BUFFER SCHEDULER
-    # --------------------------------------------------------
+    with THREAD_START_LOCK:
+        if BACKGROUND_THREADS_STARTED:
+            return
 
-    scheduler_thread = threading.Thread(
-        target=scheduler_loop,
-        daemon=True
-    )
+        BACKGROUND_THREADS_STARTED = True
 
-    scheduler_thread.start()
+        threading.Thread(
+            target=scheduler_loop,
+            daemon=True,
+            name="buffer-scheduler",
+        ).start()
 
+        threading.Thread(
+            target=heartbeat_loop,
+            daemon=True,
+            name="heartbeat",
+        ).start()
 
-    # --------------------------------------------------------
-    # HEARTBEAT
-    # --------------------------------------------------------
+        threading.Thread(
+            target=youtube_monitor_loop,
+            daemon=True,
+            name="youtube-monitor",
+        ).start()
 
-    heartbeat_thread = threading.Thread(
-        target=heartbeat_loop,
-        daemon=True
-    )
+        def start_telegram():
+            try:
+                initialize_telegram(PUBLIC_BASE_URL)
+            except Exception as exc:
+                print(
+                    f"Telegram initialization warning: {repr(exc)}",
+                    flush=True,
+                )
+                record_error(exc)
 
-    heartbeat_thread.start()
+        threading.Thread(
+            target=start_telegram,
+            daemon=True,
+            name="telegram-init",
+        ).start()
 
-
-    # --------------------------------------------------------
-    # YOUTUBE MONITOR
-    # --------------------------------------------------------
-
-    monitor_thread = threading.Thread(
-        target=youtube_monitor_loop,
-        daemon=True
-    )
-
-    monitor_thread.start()
-
-
-# ============================================================
-# TELEGRAM INITIALIZATION
-# ============================================================
-
-def start_telegram():
-
-    public_base_url = (
-        "https://pocket-option-youtube-automation-production.up.railway.app"
-    )
-
-    initialize_telegram(
-        public_base_url
-    )
-
-
-# ============================================================
-# START EVERYTHING
-# ============================================================
 
 start_background_threads()
 
-telegram_thread = threading.Thread(
-    target=start_telegram,
-    daemon=True
-)
-
-telegram_thread.start()
-
 
 # ============================================================
-# FLASK
+# LOCAL DEVELOPMENT ENTRYPOINT
 # ============================================================
 
 if __name__ == "__main__":
-
-    port = int(
-        os.getenv(
-            "PORT",
-            "8080"
-        )
-    )
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+    port = int(os.getenv("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port)

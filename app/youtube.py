@@ -1,8 +1,13 @@
 import os
 import json
-from datetime import datetime, timezone
+import random
+import time
+from datetime import timezone
+
+import httplib2
 
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -13,85 +18,23 @@ from google.auth.transport.requests import Request
 # ============================================================
 
 DATA_DIR = "/app/data"
-
-TOKEN_FILE = os.path.join(
-    DATA_DIR,
-    "youtube_token.json"
-)
+TOKEN_FILE = os.path.join(DATA_DIR, "youtube_token.json")
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
 ]
 
-
-# ============================================================
-# GET YOUTUBE SERVICE
-# ============================================================
-
-def get_youtube_service():
-
-    if not os.path.exists(
-        TOKEN_FILE
-    ):
-        raise RuntimeError(
-            "YouTube authorization token not found."
-        )
-
-    credentials = (
-        Credentials.from_authorized_user_file(
-            TOKEN_FILE,
-            SCOPES
-        )
-    )
-
-    # --------------------------------------------------------
-    # REFRESH EXPIRED TOKEN
-    # --------------------------------------------------------
-
-    if (
-        credentials.expired
-        and credentials.refresh_token
-    ):
-        credentials.refresh(
-            Request()
-        )
-
-        save_credentials(
-            credentials
-        )
-
-    # --------------------------------------------------------
-    # VALIDATE CREDENTIALS
-    # --------------------------------------------------------
-
-    if not credentials.valid:
-        raise RuntimeError(
-            "YouTube credentials are invalid. "
-            "Reconnect the YouTube account."
-        )
-
-    youtube = build(
-        "youtube",
-        "v3",
-        credentials=credentials
-    )
-
-    return youtube
+UPLOAD_RETRY_COUNT = 6
+RETRYABLE_HTTP_CODES = {429, 500, 502, 503, 504}
 
 
 # ============================================================
-# SAVE CREDENTIALS
+# CREDENTIALS
 # ============================================================
 
-def save_credentials(
-    credentials
-):
-
-    os.makedirs(
-        DATA_DIR,
-        exist_ok=True
-    )
+def save_credentials(credentials):
+    os.makedirs(DATA_DIR, exist_ok=True)
 
     data = {
         "token": credentials.token,
@@ -102,21 +45,69 @@ def save_credentials(
         "scopes": credentials.scopes,
     }
 
-    with open(
-        TOKEN_FILE,
-        "w",
-        encoding="utf-8"
-    ) as file:
+    temp_file = TOKEN_FILE + ".tmp"
 
-        json.dump(
-            data,
-            file,
-            indent=2
+    with open(temp_file, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2)
+
+    os.replace(temp_file, TOKEN_FILE)
+
+
+def get_youtube_service():
+    if not os.path.exists(TOKEN_FILE):
+        raise RuntimeError(
+            "YouTube authorization token not found. "
+            "Open /authorize and reconnect YouTube."
         )
+
+    credentials = Credentials.from_authorized_user_file(
+        TOKEN_FILE,
+        SCOPES,
+    )
+
+    if credentials.expired and credentials.refresh_token:
+        try:
+            credentials.refresh(Request())
+            save_credentials(credentials)
+            print("YouTube OAuth token refreshed.", flush=True)
+        except Exception as exc:
+            raise RuntimeError(
+                "YouTube token refresh failed. "
+                "Open /authorize and reconnect YouTube."
+            ) from exc
+
+    if not credentials.valid:
+        raise RuntimeError(
+            "YouTube credentials are invalid. "
+            "Open /authorize and reconnect YouTube."
+        )
+
+    return build(
+        "youtube",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False,
+    )
 
 
 # ============================================================
-# INTERNAL UPLOAD FUNCTION
+# RETRY HELPERS
+# ============================================================
+
+def retry_delay(attempt_number):
+    base = min(60, 2 ** attempt_number)
+    return base + random.uniform(0.0, 1.5)
+
+
+def is_retryable_http_error(exc):
+    try:
+        return int(exc.resp.status) in RETRYABLE_HTTP_CODES
+    except Exception:
+        return False
+
+
+# ============================================================
+# INTERNAL UPLOAD
 # ============================================================
 
 def _upload_video(
@@ -124,41 +115,29 @@ def _upload_video(
     title,
     description,
     privacy_status,
-    publish_at=None
+    publish_at=None,
 ):
-
-    # --------------------------------------------------------
-    # CHECK VIDEO
-    # --------------------------------------------------------
-
-    if not os.path.exists(
-        video_path
-    ):
+    if not os.path.exists(video_path):
         raise FileNotFoundError(
             f"Video not found: {video_path}"
         )
 
-    youtube = get_youtube_service()
+    if os.path.getsize(video_path) <= 0:
+        raise RuntimeError(
+            f"Video is empty: {video_path}"
+        )
 
-    # --------------------------------------------------------
-    # VIDEO STATUS
-    # --------------------------------------------------------
+    youtube = get_youtube_service()
 
     status = {
         "privacyStatus": privacy_status,
         "selfDeclaredMadeForKids": False,
     }
 
-    # --------------------------------------------------------
-    # SCHEDULED PUBLISH TIME
-    # --------------------------------------------------------
-
     if publish_at is not None:
-
         if privacy_status != "private":
             raise ValueError(
-                "Scheduled videos must use "
-                "privacyStatus='private'."
+                "Scheduled videos must use privacyStatus='private'."
             )
 
         if publish_at.tzinfo is None:
@@ -166,27 +145,11 @@ def _upload_video(
                 "publish_at must contain timezone information."
             )
 
-        publish_at_utc = (
-            publish_at.astimezone(
-                timezone.utc
-            )
-        )
-
+        publish_at_utc = publish_at.astimezone(timezone.utc)
         publish_at_string = (
-            publish_at_utc.isoformat()
-            .replace(
-                "+00:00",
-                "Z"
-            )
+            publish_at_utc.isoformat().replace("+00:00", "Z")
         )
-
-        status["publishAt"] = (
-            publish_at_string
-        )
-
-    # --------------------------------------------------------
-    # REQUEST BODY
-    # --------------------------------------------------------
+        status["publishAt"] = publish_at_string
 
     body = {
         "snippet": {
@@ -194,147 +157,103 @@ def _upload_video(
             "description": description,
             "categoryId": "22",
         },
-
-        "status": status
+        "status": status,
     }
 
-    # --------------------------------------------------------
-    # LOG
-    # --------------------------------------------------------
-
-    print(
-        "\n===== YOUTUBE UPLOAD =====",
-        flush=True
-    )
-
-    print(
-        f"File: {video_path}",
-        flush=True
-    )
-
-    print(
-        f"Title: {title}",
-        flush=True
-    )
-
-    print(
-        f"Privacy: {privacy_status.upper()}",
-        flush=True
-    )
+    print("\n===== YOUTUBE UPLOAD =====", flush=True)
+    print(f"File: {video_path}", flush=True)
+    print(f"Title: {title}", flush=True)
+    print(f"Privacy: {privacy_status.upper()}", flush=True)
 
     if publish_at is not None:
-
         print(
-            f"Scheduled publish: "
-            f"{publish_at.isoformat()}",
-            flush=True
+            f"Scheduled publish: {publish_at.isoformat()}",
+            flush=True,
         )
-
-    # --------------------------------------------------------
-    # VIDEO FILE
-    # --------------------------------------------------------
 
     media = MediaFileUpload(
         video_path,
         mimetype="video/mp4",
         resumable=True,
-        chunksize=8 * 1024 * 1024
+        chunksize=8 * 1024 * 1024,
     )
 
-    # --------------------------------------------------------
-    # CREATE REQUEST
-    # --------------------------------------------------------
-
-    request = youtube.videos().insert(
+    upload_request = youtube.videos().insert(
         part="snippet,status",
         body=body,
-        media_body=media
+        media_body=media,
     )
 
     response = None
-
-    # --------------------------------------------------------
-    # UPLOAD
-    # --------------------------------------------------------
+    retry_attempt = 0
 
     while response is None:
+        try:
+            status_response, response = upload_request.next_chunk()
 
-        status_response, response = (
-            request.next_chunk()
-        )
+            if status_response:
+                progress = int(
+                    status_response.progress() * 100
+                )
+                print(
+                    f"Upload progress: {progress}%",
+                    flush=True,
+                )
 
-        if status_response:
+            retry_attempt = 0
 
-            progress = int(
-                status_response.progress() * 100
-            )
+        except HttpError as exc:
+            if (
+                not is_retryable_http_error(exc)
+                or retry_attempt >= UPLOAD_RETRY_COUNT
+            ):
+                raise
+
+            retry_attempt += 1
+            delay = retry_delay(retry_attempt)
 
             print(
-                f"Upload progress: "
-                f"{progress}%",
-                flush=True
+                f"YouTube transient HTTP {exc.resp.status}. "
+                f"Retry {retry_attempt}/{UPLOAD_RETRY_COUNT} "
+                f"in {delay:.1f}s.",
+                flush=True,
             )
+            time.sleep(delay)
 
-    # --------------------------------------------------------
-    # VIDEO ID
-    # --------------------------------------------------------
+        except (httplib2.HttpLib2Error, OSError, TimeoutError) as exc:
+            if retry_attempt >= UPLOAD_RETRY_COUNT:
+                raise
 
-    video_id = response.get(
-        "id"
-    )
+            retry_attempt += 1
+            delay = retry_delay(retry_attempt)
+
+            print(
+                f"YouTube network error: {exc}. "
+                f"Retry {retry_attempt}/{UPLOAD_RETRY_COUNT} "
+                f"in {delay:.1f}s.",
+                flush=True,
+            )
+            time.sleep(delay)
+
+    video_id = response.get("id")
 
     if not video_id:
-
         raise RuntimeError(
-            "YouTube upload completed "
-            "but no video ID was returned."
+            "YouTube upload completed but no video ID was returned."
         )
 
-    # --------------------------------------------------------
-    # VIDEO URL
-    # --------------------------------------------------------
+    video_url = f"https://www.youtube.com/shorts/{video_id}"
 
-    video_url = (
-        f"https://www.youtube.com/shorts/"
-        f"{video_id}"
-    )
-
-    # --------------------------------------------------------
-    # SUCCESS LOG
-    # --------------------------------------------------------
-
-    print(
-        "\n===== YOUTUBE UPLOAD SUCCESS =====",
-        flush=True
-    )
-
-    print(
-        f"Video ID: {video_id}",
-        flush=True
-    )
-
-    print(
-        f"URL: {video_url}",
-        flush=True
-    )
-
-    print(
-        f"Privacy: {privacy_status.upper()}",
-        flush=True
-    )
+    print("\n===== YOUTUBE UPLOAD SUCCESS =====", flush=True)
+    print(f"Video ID: {video_id}", flush=True)
+    print(f"URL: {video_url}", flush=True)
+    print(f"Privacy: {privacy_status.upper()}", flush=True)
 
     if publish_at is not None:
-
         print(
-            f"Publish at: "
-            f"{publish_at.isoformat()}",
-            flush=True
+            f"Publish at: {publish_at.isoformat()}",
+            flush=True,
         )
-
-    print(
-        "===================================",
-        flush=True
-    )
 
     return {
         "video_id": video_id,
@@ -344,78 +263,54 @@ def _upload_video(
             publish_at.isoformat()
             if publish_at is not None
             else None
-        )
+        ),
     }
 
 
 # ============================================================
-# MANUAL TEST UPLOAD
+# PUBLIC UPLOAD FUNCTIONS
 # ============================================================
 
 def upload_short(
     video_path,
     title,
-    description
+    description,
 ):
+    print("\n===== MANUAL TEST UPLOAD =====", flush=True)
+    print("Mode: UNLISTED", flush=True)
 
-    print(
-        "\n===== MANUAL TEST UPLOAD =====",
-        flush=True
-    )
-
-    print(
-        "Mode: UNLISTED",
-        flush=True
-    )
-
-    return _upload_video(
+    result = _upload_video(
         video_path=video_path,
         title=title,
         description=description,
         privacy_status="unlisted",
-        publish_at=None
+        publish_at=None,
     )
 
+    return result["video_id"]
 
-# ============================================================
-# SCHEDULE SHORT
-# ============================================================
 
 def schedule_short(
     video_path,
     title,
     description,
-    publish_at
+    publish_at,
 ):
-
     if publish_at is None:
-
         raise ValueError(
-            "publish_at is required "
-            "for scheduled uploads."
+            "publish_at is required for scheduled uploads."
         )
 
     if publish_at.tzinfo is None:
-
         raise ValueError(
-            "publish_at must contain "
-            "timezone information."
+            "publish_at must contain timezone information."
         )
 
+    print("\n===== SCHEDULED SHORT UPLOAD =====", flush=True)
+    print("Mode: PRIVATE + SCHEDULED", flush=True)
     print(
-        "\n===== SCHEDULED SHORT UPLOAD =====",
-        flush=True
-    )
-
-    print(
-        "Mode: PRIVATE + SCHEDULED",
-        flush=True
-    )
-
-    print(
-        f"Publish time: "
-        f"{publish_at.isoformat()}",
-        flush=True
+        f"Publish time: {publish_at.isoformat()}",
+        flush=True,
     )
 
     result = _upload_video(
@@ -423,24 +318,23 @@ def schedule_short(
         title=title,
         description=description,
         privacy_status="private",
-        publish_at=publish_at
+        publish_at=publish_at,
     )
 
-    return result
+    return result["video_id"]
 
 
 # ============================================================
-# GET VIDEO STATUS
+# STATUS
 # ============================================================
 
-def get_video_status(
-    video_id
-):
-
+def get_video_status(video_id):
     if not video_id:
+        raise ValueError("video_id is required.")
 
-        raise ValueError(
-            "video_id is required."
+    if not isinstance(video_id, str):
+        raise TypeError(
+            "video_id must be a string."
         )
 
     youtube = get_youtube_service()
@@ -449,74 +343,28 @@ def get_video_status(
         youtube.videos()
         .list(
             part="snippet,status,processingDetails",
-            id=video_id
+            id=video_id,
         )
         .execute()
     )
 
-    items = response.get(
-        "items",
-        []
-    )
+    items = response.get("items", [])
 
     if not items:
-
         return None
 
     video = items[0]
-
-    snippet = video.get(
-        "snippet",
-        {}
-    )
-
-    status = video.get(
-        "status",
-        {}
-    )
-
-    processing = video.get(
-        "processingDetails",
-        {}
-    )
+    snippet = video.get("snippet", {})
+    status = video.get("status", {})
+    processing = video.get("processingDetails", {})
 
     return {
         "video_id": video.get("id"),
-
-        "title": snippet.get(
-            "title"
-        ),
-
-        "published_at": snippet.get(
-            "publishedAt"
-        ),
-
-        "privacy_status": status.get(
-            "privacyStatus"
-        ),
-
-        "upload_status": status.get(
-            "uploadStatus"
-        ),
-
-        "publish_at": status.get(
-            "publishAt"
-        ),
-
-        "failure_reason": status.get(
-            "failureReason"
-        ),
-
-        "rejection_reason": status.get(
-            "rejectionReason"
-        ),
-
-        "processing_status": processing.get(
-            "processingStatus"
-        ),
-
-        "url": (
-            f"https://www.youtube.com/shorts/"
-            f"{video.get('id')}"
-        )
+        "title": snippet.get("title"),
+        "published_at": snippet.get("publishedAt"),
+        "privacy_status": status.get("privacyStatus"),
+        "upload_status": status.get("uploadStatus"),
+        "processing_status": processing.get("processingStatus"),
+        "rejection_reason": status.get("rejectionReason"),
+        "failure_reason": status.get("failureReason"),
     }

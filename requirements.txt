@@ -8,3 +8,4 @@ Pillow
 piper-tts
 playwright
 Flask
+gunicorn
