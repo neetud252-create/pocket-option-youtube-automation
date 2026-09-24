@@ -22,6 +22,7 @@ FINAL_VIDEO_DURATION = 25.0
 OPENING_TEXT_DURATION = 5.0
 
 CTA_SOURCE = os.path.join(ASSETS_DIR, "activation_cta.mp4")
+OVERLAY_FONT_FILE = "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf"
 
 RANDOM_VIDEO_FILES = [
     "01_chart_overview.mp4",
@@ -239,6 +240,9 @@ def build_silent_video(selected_clips, short_amount, output_path):
 
     validate_clip(CTA_SOURCE)
 
+    if not os.path.exists(OVERLAY_FONT_FILE):
+        raise RuntimeError(f"Overlay font is missing: {OVERLAY_FONT_FILE}")
+
     input_args = []
     filters = []
 
@@ -275,19 +279,29 @@ def build_silent_video(selected_clips, short_amount, output_path):
         f"{concat_inputs}concat=n={NUMBER_OF_CLIPS + 1}:v=1:a=0[joined]"
     )
 
+    # Keep the existing wording, but match the reference styling:
+    # large condensed bold uppercase, neon green first line, yellow second line,
+    # thick black outline and subtle black drop shadow for maximum readability.
     amount_text = escape_drawtext(f"I MADE: ${short_amount} EVERY DAY")
     link_text = escape_drawtext("LINK IN BIO")
+    font_file = escape_drawtext(OVERLAY_FONT_FILE)
 
     filters.append(
         "[joined]"
         "drawtext="
+        f"fontfile='{font_file}':"
         f"text='{amount_text}':"
-        "fontcolor=white:fontsize=62:borderw=4:bordercolor=black:"
-        "x=(w-text_w)/2:y=180:enable='between(t,0,5)',"
+        "fontcolor=0x7CFC00:fontsize=72:"
+        "borderw=7:bordercolor=black:"
+        "shadowcolor=black@0.90:shadowx=3:shadowy=3:"
+        "x=(w-text_w)/2:y=150:enable='between(t,0,5)',"
         "drawtext="
+        f"fontfile='{font_file}':"
         f"text='{link_text}':"
-        "fontcolor=white:fontsize=55:borderw=4:bordercolor=black:"
-        "x=(w-text_w)/2:y=270:enable='between(t,0,5)'"
+        "fontcolor=0xFFF200:fontsize=76:"
+        "borderw=7:bordercolor=black:"
+        "shadowcolor=black@0.90:shadowx=3:shadowy=3:"
+        "x=(w-text_w)/2:y=245:enable='between(t,0,5)'"
         "[outv]"
     )
 
