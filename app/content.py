@@ -1,8 +1,9 @@
-import os
 import json
+import os
 import random
 import re
 import time
+
 import requests
 
 
@@ -13,11 +14,7 @@ import requests
 HISTORY_FILE = "/app/data/content_history.json"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-# Railway does not need a GEMINI_MODEL variable. If it is missing,
-# this stable default is used automatically.
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/"
     "v1beta/models/"
@@ -27,7 +24,7 @@ GEMINI_URL = (
 MIN_SCRIPT_WORDS = 30
 MAX_SCRIPT_WORDS = 60
 MAX_HISTORY = 1000
-GEMINI_ATTEMPTS = 8
+GEMINI_ATTEMPTS = 4
 
 
 # ============================================================
@@ -36,93 +33,93 @@ GEMINI_ATTEMPTS = 8
 
 FALLBACK_CONTENT = [
     {
-        "title": "Pocket Option AI Bot Explained in Simple Terms",
+        "title": "Pocket Option AI Bot Chart Analysis Explained",
         "script": (
-            "The Pocket Option AI Bot is designed to analyze market information "
-            "and identify possible trading setups. Instead of manually watching "
-            "charts all day, the bot helps organize the analysis into a simpler "
-            "workflow that users can review before making their own trading decisions."
+            "The Pocket Option AI Bot can review chart movement and organize market "
+            "information into a clearer analysis workflow. It looks for patterns and "
+            "possible setups automatically, while the user still reviews the market "
+            "conditions before making an independent trading decision."
         ),
     },
     {
-        "title": "How Pocket Option AI Trading Bot Analyzes Markets",
+        "title": "Pocket Option AI Trading Bot Market Scanner",
         "script": (
-            "A Pocket Option AI Trading Bot can process market information and "
-            "look for patterns that may be useful during analysis. The idea is to "
-            "reduce repetitive chart watching and provide a more structured way "
-            "to review potential trading opportunities before making a decision."
+            "A Pocket Option AI Trading Bot can work like a market scanner by checking "
+            "chart data for patterns and signals. This reduces repetitive monitoring "
+            "and gives users a structured set of observations they can review as part "
+            "of their own market research."
         ),
     },
     {
-        "title": "Pocket Option AI Bot Trading Workflow",
+        "title": "Pocket Option AI Bot Candlestick Analysis",
         "script": (
-            "Here is a simple look at the Pocket Option AI Bot workflow. Market "
-            "information is analyzed first, possible setups are identified, and "
-            "the results can then be reviewed before making any trading decision. "
-            "It is designed to simplify repetitive analysis."
+            "Candlestick patterns can provide useful context when studying price action. "
+            "The Pocket Option AI Bot can process those patterns alongside other market "
+            "information, helping users organize their analysis and identify areas that "
+            "may deserve a closer review."
         ),
     },
     {
-        "title": "Pocket Option AI Bot Market Analysis",
+        "title": "Pocket Option AI Trading Bot Signal Review",
         "script": (
-            "The Pocket Option AI Bot focuses on market analysis rather than "
-            "simply guessing the next price movement. It can examine chart "
-            "information and patterns to help organize the research process "
-            "before a trader decides what action, if any, makes sense."
+            "Trading signals are more useful when they are reviewed with broader market "
+            "context. The Pocket Option AI Trading Bot can organize signal information, "
+            "chart movement, and patterns so users have a more structured starting point "
+            "for their own analysis."
         ),
     },
     {
-        "title": "Pocket Option AI Trading Bot Chart Analysis",
+        "title": "Pocket Option AI Bot Technical Indicator Workflow",
         "script": (
-            "Watching charts manually can take a lot of time. A Pocket Option AI "
-            "Trading Bot can help analyze chart information and organize potential "
-            "setups. The goal is to make the research process more structured "
-            "while keeping the final decision with the trader."
+            "Technical indicators can add context to a chart, but they still need careful "
+            "interpretation. The Pocket Option AI Bot can process indicator information "
+            "alongside price movement and patterns, helping users review a potential setup "
+            "in a more organized way."
         ),
     },
     {
-        "title": "Pocket Option AI Bot Signal Analysis",
+        "title": "Pocket Option AI Bot Automated Market Monitoring",
         "script": (
-            "The Pocket Option AI Bot can be used as an analysis tool for reviewing "
-            "market signals and chart patterns. It helps bring different pieces of "
-            "market information together so traders can spend less time on repetitive "
-            "manual observation and more time reviewing the setup."
+            "Continuous chart monitoring can become repetitive during an active market. "
+            "The Pocket Option AI Bot can automate part of that work by processing market "
+            "information and highlighting patterns for review, while the final trading "
+            "decision remains with the user."
         ),
     },
     {
-        "title": "Pocket Option AI Bot for Beginners",
+        "title": "Pocket Option AI Trading Bot Pattern Detection",
         "script": (
-            "If you are new to automated trading tools, the Pocket Option AI Bot "
-            "is worth understanding before using it. The system focuses on analyzing "
-            "market information and presenting potential setups in a more organized "
-            "workflow for the user to review."
+            "Pattern detection is one task that automated tools can handle consistently. "
+            "A Pocket Option AI Trading Bot can scan chart information for recognizable "
+            "structures and possible setups, giving users another source of information "
+            "to compare with their own analysis."
         ),
     },
     {
-        "title": "Pocket Option AI Trading Bot Technology",
+        "title": "Pocket Option AI Bot Price Action Research",
         "script": (
-            "The technology behind a Pocket Option AI Trading Bot can combine market "
-            "data, chart patterns, and automated analysis. This type of system is "
-            "built to handle repetitive research tasks and help traders review market "
-            "conditions more efficiently."
+            "Price action can change quickly, which makes manual monitoring difficult. "
+            "The Pocket Option AI Bot can process chart movement and organize possible "
+            "patterns into a research workflow, helping users review market conditions "
+            "without relying on a single signal alone."
         ),
     },
     {
-        "title": "Pocket Option AI Bot and Candlestick Patterns",
+        "title": "Pocket Option AI Trading Bot Analysis Workflow",
         "script": (
-            "Candlestick patterns are an important part of chart analysis. A Pocket "
-            "Option AI Bot can examine this type of market information together with "
-            "other signals to identify areas that may deserve closer attention during "
-            "a trading session."
+            "A structured workflow can make market research easier to follow. The Pocket "
+            "Option AI Trading Bot can examine chart data, identify patterns, and organize "
+            "possible setups so users can review the information before deciding whether "
+            "any trade idea is worth considering."
         ),
     },
     {
-        "title": "Pocket Option AI Bot Real Time Market Analysis",
+        "title": "Pocket Option AI Bot Market Data Review",
         "script": (
-            "Market conditions can change quickly, which makes constant chart monitoring "
-            "difficult. The Pocket Option AI Bot is designed to assist with market "
-            "analysis by processing available information and highlighting patterns "
-            "that may need further review."
+            "Market data contains many small changes that can be difficult to follow "
+            "manually. The Pocket Option AI Bot can process that information and highlight "
+            "patterns for further review, giving users a more organized way to study "
+            "current chart conditions."
         ),
     },
 ]
@@ -153,8 +150,8 @@ def load_history():
         return []
 
     try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with open(HISTORY_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
 
         if not isinstance(data, list):
             return []
@@ -171,17 +168,17 @@ def load_history():
 
 def save_history(history):
     ensure_data_directory()
-    temporary_file = HISTORY_FILE + ".tmp"
+    temp_file = HISTORY_FILE + ".tmp"
 
-    with open(temporary_file, "w", encoding="utf-8") as f:
+    with open(temp_file, "w", encoding="utf-8") as file:
         json.dump(
             history,
-            f,
+            file,
             indent=2,
             ensure_ascii=False,
         )
 
-    os.replace(temporary_file, HISTORY_FILE)
+    os.replace(temp_file, HISTORY_FILE)
 
 
 def get_used_titles(history):
@@ -228,7 +225,6 @@ def clean_json_text(text):
     )
     text = re.sub(r"^```\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
-
     return text.strip()
 
 
@@ -297,101 +293,129 @@ def validate_content(title, script):
 # GEMINI GENERATION
 # ============================================================
 
+def extract_final_text(data):
+    try:
+        candidate = data["candidates"][0]
+    except Exception as exc:
+        raise RuntimeError(
+            f"Gemini response has no candidate: {str(data)[:1000]}"
+        ) from exc
+
+    finish_reason = candidate.get("finishReason")
+
+    if finish_reason == "MAX_TOKENS":
+        raise RuntimeError(
+            "Gemini hit MAX_TOKENS before finishing the response."
+        )
+
+    parts = candidate.get("content", {}).get("parts", [])
+
+    final_parts = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if part.get("thought") is True:
+            continue
+        text = part.get("text")
+        if text:
+            final_parts.append(text)
+
+    if not final_parts:
+        raise RuntimeError(
+            "Gemini response did not contain final generated text."
+        )
+
+    return "".join(final_parts).strip()
+
+
 def generate_with_gemini(history):
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-    used_titles = [
+    # Keep the prompt compact. Full duplicate protection still uses all
+    # stored history after generation.
+    recent_titles = [
         item.get("title", "")
-        for item in history[-50:]
-        if isinstance(item, dict)
+        for item in history[-30:]
+        if isinstance(item, dict) and item.get("title")
     ]
 
-    used_scripts = [
+    recent_scripts = [
         item.get("script", "")
-        for item in history[-30:]
-        if isinstance(item, dict)
+        for item in history[-20:]
+        if isinstance(item, dict) and item.get("script")
     ]
 
     recent_titles_text = "\n".join(
-        f"- {title}" for title in used_titles if title
+        f"- {title}" for title in recent_titles
     )
-
     recent_scripts_text = "\n".join(
-        f"- {script}" for script in used_scripts if script
+        f"- {script}" for script in recent_scripts
     )
 
     prompt = f"""
-Create ONE completely NEW YouTube Short title and ONE
-completely NEW spoken script about Pocket Option AI Bot.
+Create ONE new YouTube Short title and ONE new spoken script about a
+Pocket Option AI Bot.
 
-IMPORTANT:
-The title MUST contain either:
-"Pocket Option AI Bot"
-or
-"Pocket Option AI Trading Bot"
+RULES:
+- The title must naturally contain exactly one of these keyword phrases:
+  "Pocket Option AI Bot" or "Pocket Option AI Trading Bot".
+- The title should be useful, specific, and different from prior titles.
+- The spoken script must be 30 to 55 words.
+- Use simple, natural spoken English.
+- Focus on one educational topic such as chart analysis, market analysis,
+  signals, candlestick patterns, technical indicators, automated analysis,
+  market monitoring, trading technology, or bot workflow.
+- Do not promise profits, guaranteed outcomes, accuracy, win rates, or income.
+- Do not invent statistics.
+- Do not include any call to action.
+- Do not mention a link, bio, channel description, activation button, or
+  related video.
+- Make the title and script genuinely different from the recent content.
 
-The script must be 30 to 55 words.
-Use natural spoken English.
+RECENT TITLES TO AVOID:
+{recent_titles_text or "None"}
 
-Explain ONE specific topic related to:
-- AI trading bots
-- chart analysis
-- market analysis
-- trading signals
-- candlestick patterns
-- technical indicators
-- automated analysis
-- market monitoring
-- trading technology
-- bot workflow
-
-Do NOT promise profits.
-Do NOT claim guaranteed results.
-Do NOT claim a guaranteed win rate.
-Do NOT invent statistics.
-Do NOT mention a link.
-Do NOT mention a channel description.
-Do NOT mention a Bot Activation button.
-Do NOT mention "Related Video".
-Do NOT include a call to action.
-
-The script must stand alone as educational or explanatory content.
-
-MOST IMPORTANT:
-The title and script MUST be different from every previous
-title and script listed below.
-
-PREVIOUS TITLES:
-{recent_titles_text}
-
-PREVIOUS SCRIPTS:
-{recent_scripts_text}
-
-Return ONLY valid JSON in exactly this structure:
-
-{{
-  "title": "Pocket Option AI Bot ...",
-  "script": "..."
-}}
+RECENT SCRIPTS TO AVOID:
+{recent_scripts_text or "None"}
 """
 
+    # Gemini 3.x thinking tokens count toward maxOutputTokens. A larger cap
+    # plus low thinking prevents the truncated JSON seen with a 300-token cap.
+    # Structured output makes the final response valid JSON by contract.
     payload = {
         "contents": [
             {
                 "parts": [
-                    {
-                        "text": prompt,
-                    }
+                    {"text": prompt}
                 ]
             }
         ],
         "generationConfig": {
-            "temperature": 1.15,
-            "topP": 0.95,
-            "topK": 40,
-            "maxOutputTokens": 300,
-        },
+            "maxOutputTokens": 2048,
+            "thinkingConfig": {
+                "thinkingLevel": "low"
+            },
+            "responseFormat": {
+                "text": {
+                    "mimeType": "application/json",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "Unique YouTube Short title"
+                            },
+                            "script": {
+                                "type": "string",
+                                "description": "30 to 55 word spoken script"
+                            }
+                        },
+                        "required": ["title", "script"]
+                    }
+                }
+            }
+        }
     }
 
     headers = {
@@ -404,50 +428,35 @@ Return ONLY valid JSON in exactly this structure:
         flush=True,
     )
 
-    response = requests.post(
-        GEMINI_URL,
-        headers=headers,
-        json=payload,
-        timeout=90,
-    )
+    try:
+        response = requests.post(
+            GEMINI_URL,
+            headers=headers,
+            json=payload,
+            timeout=90,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"Gemini connection failed: {exc}"
+        ) from exc
 
     if response.status_code != 200:
         raise RuntimeError(
             "Gemini API error "
             f"{response.status_code}: "
-            f"{response.text[:1000]}"
+            f"{response.text[:1500]}"
         )
 
     data = response.json()
-
-    try:
-        generated_text = (
-            data["candidates"][0]["content"]["parts"][0]["text"]
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            "Gemini response did not contain generated text."
-        ) from exc
-
-    generated_text = clean_json_text(generated_text)
+    generated_text = clean_json_text(extract_final_text(data))
 
     try:
         result = json.loads(generated_text)
-
-    except json.JSONDecodeError:
-        match = re.search(
-            r"\{.*\}",
-            generated_text,
-            flags=re.DOTALL,
-        )
-
-        if not match:
-            raise RuntimeError(
-                "Gemini returned invalid JSON: "
-                f"{generated_text}"
-            )
-
-        result = json.loads(match.group(0))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Gemini returned invalid structured JSON: "
+            f"{generated_text[:1500]}"
+        ) from exc
 
     title = str(result.get("title", "")).strip()
     script = str(result.get("script", "")).strip()
@@ -463,14 +472,12 @@ def get_unused_fallback(history):
     used_titles = get_used_titles(history)
     used_scripts = get_used_scripts(history)
 
-    unused = []
-
-    for item in FALLBACK_CONTENT:
-        if (
-            normalize_text(item["title"]) not in used_titles
-            and normalize_text(item["script"]) not in used_scripts
-        ):
-            unused.append(item)
+    unused = [
+        item
+        for item in FALLBACK_CONTENT
+        if normalize_text(item["title"]) not in used_titles
+        and normalize_text(item["script"]) not in used_scripts
+    ]
 
     if not unused:
         return None
@@ -483,52 +490,39 @@ def create_unique_fallback_variant(history):
     used_scripts = get_used_scripts(history)
 
     topics = [
-        (
-            "Chart Monitoring",
-            "chart monitoring and automated pattern review",
-        ),
-        (
-            "Market Research",
-            "market research and structured chart analysis",
-        ),
-        (
-            "Trading Technology",
-            "trading technology and automated market analysis",
-        ),
-        (
-            "Pattern Scanner",
-            "pattern scanning and chart information review",
-        ),
-        (
-            "Price Analysis",
-            "price analysis and market movement research",
-        ),
-        (
-            "Signal Review",
-            "signal review and technical market analysis",
-        ),
-        (
-            "Indicator Analysis",
-            "indicator analysis and chart research",
-        ),
+        ("Chart Monitoring", "chart monitoring and price movement"),
+        ("Market Research", "market research and structured chart review"),
+        ("Pattern Scanner", "pattern scanning and technical chart information"),
+        ("Indicator Review", "technical indicators and market context"),
+        ("Signal Analysis", "signal analysis and broader chart conditions"),
+        ("Price Action", "price action and automated market review"),
+        ("Trend Review", "trend review and changing market conditions"),
+        ("Data Analysis", "market data and automated chart analysis"),
     ]
 
-    for number in range(1, 10001):
-        topic_name, topic_description = topics[
-            (number - 1) % len(topics)
-        ]
+    angles = [
+        "Workflow",
+        "Explained",
+        "Research Guide",
+        "Analysis Method",
+        "Review Process",
+        "Technology Overview",
+    ]
 
-        title = (
-            f"Pocket Option AI Bot {topic_name} "
-            f"Topic {number}"
-        )
+    combinations = [
+        (topic_name, topic_description, angle)
+        for topic_name, topic_description in topics
+        for angle in angles
+    ]
+    random.shuffle(combinations)
 
+    for topic_name, topic_description, angle in combinations:
+        title = f"Pocket Option AI Bot {topic_name} {angle}"
         script = (
-            f"This Pocket Option AI Bot topic focuses on "
-            f"{topic_description}, variation {number}. "
-            "The system can process chart information and identify "
-            "patterns that users may review as part of their own "
-            "research before making an independent trading decision."
+            f"This Pocket Option AI Bot workflow focuses on {topic_description}. "
+            "It can process chart information and organize patterns automatically, "
+            "giving users a clearer set of observations to review as part of their "
+            "own research before making an independent trading decision."
         )
 
         if (
@@ -537,9 +531,23 @@ def create_unique_fallback_variant(history):
         ):
             return title, script
 
-    raise RuntimeError(
-        "Could not create a unique fallback."
-    )
+    # Last-resort uniqueness if all natural combinations have been used.
+    for number in range(1, 10001):
+        title = f"Pocket Option AI Bot Market Review #{number}"
+        script = (
+            f"This Pocket Option AI Bot market review looks at automated chart "
+            f"analysis from research angle {number}. The system organizes market "
+            "information and patterns for review, helping users compare observations "
+            "before making their own independent trading decisions."
+        )
+
+        if (
+            normalize_text(title) not in used_titles
+            and normalize_text(script) not in used_scripts
+        ):
+            return title, script
+
+    raise RuntimeError("Could not create a unique fallback.")
 
 
 # ============================================================
@@ -560,18 +568,9 @@ def save_new_content(title, script, history):
 
     save_history(history)
 
-    print(
-        f"\nSaved to content history:\n{HISTORY_FILE}",
-        flush=True,
-    )
-    print(
-        f"\nFINAL TITLE:\n{title}",
-        flush=True,
-    )
-    print(
-        f"\nFINAL SCRIPT:\n{script}",
-        flush=True,
-    )
+    print(f"\nSaved to content history:\n{HISTORY_FILE}", flush=True)
+    print(f"\nFINAL TITLE:\n{title}", flush=True)
+    print(f"\nFINAL SCRIPT:\n{script}", flush=True)
 
     return title.strip(), script.strip()
 
@@ -581,18 +580,9 @@ def save_new_content(title, script, history):
 # ============================================================
 
 def generate_content():
-    print(
-        "\n==========================================",
-        flush=True,
-    )
-    print(
-        "GENERATING UNIQUE CONTENT",
-        flush=True,
-    )
-    print(
-        "==========================================",
-        flush=True,
-    )
+    print("\n==========================================", flush=True)
+    print("GENERATING UNIQUE CONTENT", flush=True)
+    print("==========================================", flush=True)
 
     history = load_history()
 
@@ -610,22 +600,13 @@ def generate_content():
 
             title, script = generate_with_gemini(history)
 
-            print(
-                f"Generated title: {title}",
-                flush=True,
-            )
-            print(
-                f"Script words: {word_count(script)}",
-                flush=True,
-            )
+            print(f"Generated title: {title}", flush=True)
+            print(f"Script words: {word_count(script)}", flush=True)
 
             valid, reason = validate_content(title, script)
 
             if not valid:
-                print(
-                    f"Rejected: {reason}",
-                    flush=True,
-                )
+                print(f"Rejected: {reason}", flush=True)
                 continue
 
             if is_duplicate(title, script, history):
@@ -635,16 +616,8 @@ def generate_content():
                 )
                 continue
 
-            print(
-                "\nNEW UNIQUE CONTENT ACCEPTED",
-                flush=True,
-            )
-
-            return save_new_content(
-                title,
-                script,
-                history,
-            )
+            print("\nNEW UNIQUE CONTENT ACCEPTED", flush=True)
+            return save_new_content(title, script, history)
 
         except Exception as exc:
             print(
@@ -656,7 +629,7 @@ def generate_content():
                 time.sleep(2)
 
     print(
-        "\nGemini could not produce valid unique content.",
+        "\nGemini could not produce valid unique content; using fallback.",
         flush=True,
     )
 
@@ -666,9 +639,7 @@ def generate_content():
         title = fallback["title"]
         script = fallback["script"]
     else:
-        title, script = create_unique_fallback_variant(
-            history
-        )
+        title, script = create_unique_fallback_variant(history)
 
     valid, reason = validate_content(title, script)
 
@@ -678,25 +649,10 @@ def generate_content():
         )
 
     if is_duplicate(title, script, history):
-        raise RuntimeError(
-            "Fallback content is still duplicated."
-        )
+        raise RuntimeError("Fallback content is still duplicated.")
 
-    print(
-        "\nUNIQUE FALLBACK ACCEPTED",
-        flush=True,
-    )
-    print(
-        f"Title: {title}",
-        flush=True,
-    )
-    print(
-        f"Words: {word_count(script)}",
-        flush=True,
-    )
+    print("\nUNIQUE FALLBACK ACCEPTED", flush=True)
+    print(f"Title: {title}", flush=True)
+    print(f"Words: {word_count(script)}", flush=True)
 
-    return save_new_content(
-        title,
-        script,
-        history,
-    )
+    return save_new_content(title, script, history)
