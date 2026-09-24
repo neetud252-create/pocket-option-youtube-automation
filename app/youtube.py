@@ -35,10 +35,6 @@ YOUTUBE_AUTH_LOCK = threading.Lock()
 # ============================================================
 
 def save_credentials(credentials):
-    """
-    Persist the complete Google credential JSON, including expiry.
-    Atomic replacement protects the persistent token file from partial writes.
-    """
     os.makedirs(DATA_DIR, exist_ok=True)
     temp_file = TOKEN_FILE + ".tmp"
 
@@ -49,12 +45,6 @@ def save_credentials(credentials):
 
 
 def get_youtube_service():
-    """
-    Build an authenticated YouTube client.
-
-    The lock prevents the scheduler and status-monitor thread from trying to
-    refresh and rewrite the same OAuth token at the same time.
-    """
     with YOUTUBE_AUTH_LOCK:
         if not os.path.exists(TOKEN_FILE):
             raise RuntimeError(
@@ -120,14 +110,10 @@ def _upload_video(
     publish_at=None,
 ):
     if not os.path.exists(video_path):
-        raise FileNotFoundError(
-            f"Video not found: {video_path}"
-        )
+        raise FileNotFoundError(f"Video not found: {video_path}")
 
     if os.path.getsize(video_path) <= 0:
-        raise RuntimeError(
-            f"Video is empty: {video_path}"
-        )
+        raise RuntimeError(f"Video is empty: {video_path}")
 
     youtube = get_youtube_service()
 
@@ -138,20 +124,13 @@ def _upload_video(
 
     if publish_at is not None:
         if privacy_status != "private":
-            raise ValueError(
-                "Scheduled videos must use privacyStatus='private'."
-            )
+            raise ValueError("Scheduled videos must use privacyStatus='private'.")
 
         if publish_at.tzinfo is None:
-            raise ValueError(
-                "publish_at must contain timezone information."
-            )
+            raise ValueError("publish_at must contain timezone information.")
 
         publish_at_utc = publish_at.astimezone(timezone.utc)
-        publish_at_string = (
-            publish_at_utc.isoformat().replace("+00:00", "Z")
-        )
-        status["publishAt"] = publish_at_string
+        status["publishAt"] = publish_at_utc.isoformat().replace("+00:00", "Z")
 
     body = {
         "snippet": {
@@ -168,10 +147,7 @@ def _upload_video(
     print(f"Privacy: {privacy_status.upper()}", flush=True)
 
     if publish_at is not None:
-        print(
-            f"Scheduled publish: {publish_at.isoformat()}",
-            flush=True,
-        )
+        print(f"Scheduled publish: {publish_at.isoformat()}", flush=True)
 
     media = MediaFileUpload(
         video_path,
@@ -195,10 +171,7 @@ def _upload_video(
 
             if status_response:
                 progress = int(status_response.progress() * 100)
-                print(
-                    f"Upload progress: {progress}%",
-                    flush=True,
-                )
+                print(f"Upload progress: {progress}%", flush=True)
 
             retry_attempt = 0
 
@@ -211,11 +184,9 @@ def _upload_video(
 
             retry_attempt += 1
             delay = retry_delay(retry_attempt)
-
             print(
                 f"YouTube transient HTTP {exc.resp.status}. "
-                f"Retry {retry_attempt}/{UPLOAD_RETRY_COUNT} "
-                f"in {delay:.1f}s.",
+                f"Retry {retry_attempt}/{UPLOAD_RETRY_COUNT} in {delay:.1f}s.",
                 flush=True,
             )
             time.sleep(delay)
@@ -226,44 +197,28 @@ def _upload_video(
 
             retry_attempt += 1
             delay = retry_delay(retry_attempt)
-
             print(
                 f"YouTube network error: {exc}. "
-                f"Retry {retry_attempt}/{UPLOAD_RETRY_COUNT} "
-                f"in {delay:.1f}s.",
+                f"Retry {retry_attempt}/{UPLOAD_RETRY_COUNT} in {delay:.1f}s.",
                 flush=True,
             )
             time.sleep(delay)
 
     video_id = response.get("id")
-
     if not video_id:
-        raise RuntimeError(
-            "YouTube upload completed but no video ID was returned."
-        )
+        raise RuntimeError("YouTube upload completed but no video ID was returned.")
 
     video_url = f"https://www.youtube.com/shorts/{video_id}"
 
     print("\n===== YOUTUBE UPLOAD SUCCESS =====", flush=True)
     print(f"Video ID: {video_id}", flush=True)
     print(f"URL: {video_url}", flush=True)
-    print(f"Privacy: {privacy_status.upper()}", flush=True)
-
-    if publish_at is not None:
-        print(
-            f"Publish at: {publish_at.isoformat()}",
-            flush=True,
-        )
 
     return {
         "video_id": video_id,
         "url": video_url,
         "privacy_status": privacy_status,
-        "publish_at": (
-            publish_at.isoformat()
-            if publish_at is not None
-            else None
-        ),
+        "publish_at": publish_at.isoformat() if publish_at is not None else None,
     }
 
 
@@ -282,32 +237,19 @@ def upload_short(video_path, title, description):
         privacy_status="unlisted",
         publish_at=None,
     )
-
     return result["video_id"]
 
 
-def schedule_short(
-    video_path,
-    title,
-    description,
-    publish_at,
-):
+def schedule_short(video_path, title, description, publish_at):
     if publish_at is None:
-        raise ValueError(
-            "publish_at is required for scheduled uploads."
-        )
+        raise ValueError("publish_at is required for scheduled uploads.")
 
     if publish_at.tzinfo is None:
-        raise ValueError(
-            "publish_at must contain timezone information."
-        )
+        raise ValueError("publish_at must contain timezone information.")
 
     print("\n===== SCHEDULED SHORT UPLOAD =====", flush=True)
     print("Mode: PRIVATE + SCHEDULED", flush=True)
-    print(
-        f"Publish time: {publish_at.isoformat()}",
-        flush=True,
-    )
+    print(f"Publish time: {publish_at.isoformat()}", flush=True)
 
     result = _upload_video(
         video_path=video_path,
@@ -316,8 +258,30 @@ def schedule_short(
         privacy_status="private",
         publish_at=publish_at,
     )
-
     return result["video_id"]
+
+
+# ============================================================
+# DELETE / REPLACE SUPPORT
+# ============================================================
+
+def delete_video(video_id):
+    """Delete one YouTube video. A missing video is treated as already deleted."""
+    if not video_id or not isinstance(video_id, str):
+        raise ValueError("A valid video_id is required.")
+
+    youtube = get_youtube_service()
+
+    try:
+        youtube.videos().delete(id=video_id).execute()
+        print(f"YouTube video deleted: {video_id}", flush=True)
+        return True
+    except HttpError as exc:
+        status = getattr(exc.resp, "status", None)
+        if status == 404:
+            print(f"YouTube video already missing: {video_id}", flush=True)
+            return True
+        raise
 
 
 # ============================================================
@@ -343,7 +307,6 @@ def get_video_status(video_id):
     )
 
     items = response.get("items", [])
-
     if not items:
         return None
 
