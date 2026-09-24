@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -35,11 +36,11 @@ CTA_AUDIO_SECONDS = 5.0
 FINAL_AUDIO_SECONDS = 25.0
 ELEVENLABS_RETRIES = 3
 
-# Short-form pacing: remove long dead-air pauses while keeping a small,
-# natural gap between phrases/sentences.
+# Retention-first pacing: remove dead air, but never slow the voice down
+# just to fill the 20-second narration section.
 SILENCE_THRESHOLD_DB = -48
-LONG_PAUSE_SECONDS = 0.28
-KEPT_PAUSE_SECONDS = 0.10
+LONG_PAUSE_SECONDS = 0.20
+KEPT_PAUSE_SECONDS = 0.06
 
 
 # ============================================================
@@ -138,6 +139,14 @@ def safe_remove(path):
         pass
 
 
+def clean_spoken_text(text):
+    value = str(text or "")
+    value = value.replace("…", ".").replace("...", ".")
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"\s+([,.!?])", r"\1", value)
+    return value.strip()
+
+
 # ============================================================
 # ELEVENLABS
 # ============================================================
@@ -147,6 +156,10 @@ def elevenlabs_tts(text, output_path):
 
     if not api_key:
         raise RuntimeError("ELEVENLABS_API_KEY is not configured.")
+
+    clean_text = clean_spoken_text(text)
+    if not clean_text:
+        raise RuntimeError("ElevenLabs text is empty.")
 
     url = f"{ELEVENLABS_API_URL}/{VOICE_ID}/with-timestamps"
 
@@ -158,16 +171,16 @@ def elevenlabs_tts(text, output_path):
     params = {"output_format": "mp3_44100_128"}
 
     payload = {
-        "text": text,
+        "text": clean_text,
         "model_id": MODEL_ID,
         "voice_settings": {
-            "stability": 0.48,
-            "similarity_boost": 0.85,
-            "style": 0.08,
+            # More expressive, energetic delivery without sounding unstable.
+            "stability": 0.36,
+            "similarity_boost": 0.84,
+            "style": 0.30,
             "use_speaker_boost": True,
-            # Slightly quicker base delivery for Shorts. Final timing is
-            # normalized later, so this mainly improves sentence energy.
-            "speed": 1.03,
+            # Noticeably faster than the old voice, while staying natural.
+            "speed": 1.08,
         },
     }
 
@@ -176,7 +189,7 @@ def elevenlabs_tts(text, output_path):
     for attempt in range(1, ELEVENLABS_RETRIES + 1):
         print(
             f"ElevenLabs request {attempt}/{ELEVENLABS_RETRIES} | "
-            f"voice={VOICE_ID} model={MODEL_ID}",
+            f"voice={VOICE_ID} model={MODEL_ID} speed=1.08",
             flush=True,
         )
 
@@ -189,7 +202,9 @@ def elevenlabs_tts(text, output_path):
                 timeout=120,
             )
         except requests.RequestException as exc:
-            last_error = RuntimeError(f"ElevenLabs connection failed: {exc}")
+            last_error = RuntimeError(
+                f"ElevenLabs connection failed: {exc}"
+            )
             if attempt < ELEVENLABS_RETRIES:
                 time.sleep(2 * attempt)
                 continue
@@ -218,15 +233,18 @@ def elevenlabs_tts(text, output_path):
             f"ElevenLabs HTTP {response.status_code}: {provider_message}"
         )
 
-        # Retry temporary rate/server failures. Quota/auth errors should fail
-        # immediately so the scheduler can retry later instead of wasting time.
-        if response.status_code in {429, 500, 502, 503, 504} and attempt < ELEVENLABS_RETRIES:
+        if (
+            response.status_code in {429, 500, 502, 503, 504}
+            and attempt < ELEVENLABS_RETRIES
+        ):
             time.sleep(2 * attempt)
             continue
 
         raise last_error
 
-    raise last_error or RuntimeError("ElevenLabs voice generation failed.")
+    raise last_error or RuntimeError(
+        "ElevenLabs voice generation failed."
+    )
 
 
 # ============================================================
@@ -252,7 +270,7 @@ def piper_tts(text, output_path):
                 wav_path,
             ],
             "Generating local Piper voice",
-            input_text=text.strip() + "\n",
+            input_text=clean_spoken_text(text) + "\n",
             timeout=180,
         )
 
@@ -286,11 +304,6 @@ def piper_tts(text, output_path):
 
 
 def generate_raw_segment(text, output_path, require_elevenlabs=False):
-    """
-    Scheduled production Shorts can use require_elevenlabs=True to guarantee
-    the paid ElevenLabs voice. Other/manual jobs may use Piper as a safety
-    fallback if ElevenLabs is temporarily unavailable.
-    """
     try:
         if os.getenv("ELEVENLABS_API_KEY"):
             elevenlabs_tts(text, output_path)
@@ -304,7 +317,8 @@ def generate_raw_segment(text, output_path, require_elevenlabs=False):
 
     if require_elevenlabs:
         raise RuntimeError(
-            "Scheduled production requires ElevenLabs, but ElevenLabs is unavailable."
+            "Scheduled production requires ElevenLabs, "
+            "but ElevenLabs is unavailable."
         )
 
     piper_tts(text, output_path)
@@ -317,12 +331,13 @@ def generate_raw_segment(text, output_path, require_elevenlabs=False):
 # ============================================================
 
 def compact_silence(input_path, output_path):
-    """Compress long pauses inside narration to short natural pauses."""
+    """Reduce long sentence pauses to a quick, natural beat."""
     validate_audio(input_path)
 
     silence_filter = (
         "silenceremove="
-        f"start_periods=1:start_duration=0.03:start_threshold={SILENCE_THRESHOLD_DB}dB:"
+        f"start_periods=1:start_duration=0.02:"
+        f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
         f"stop_periods=-1:stop_duration={LONG_PAUSE_SECONDS:.2f}:"
         f"stop_threshold={SILENCE_THRESHOLD_DB}dB:"
         f"stop_silence={KEPT_PAUSE_SECONDS:.2f}"
@@ -355,11 +370,6 @@ def compact_silence(input_path, output_path):
 
 
 def atempo_filters_for_factor(speed_factor):
-    """
-    Build valid FFmpeg atempo filters for both speed-up (>1) and
-    slow-down (<1). This lets narration fill its 20-second section instead
-    of being followed by several seconds of dead air.
-    """
     factor = max(0.10, float(speed_factor))
     filters = []
 
@@ -377,16 +387,29 @@ def atempo_filters_for_factor(speed_factor):
     return filters
 
 
-def fit_audio_to_exact_duration(input_path, output_path, target_seconds):
+def fit_audio_without_slowing(
+    input_path,
+    output_path,
+    target_seconds,
+):
+    """
+    Keep ElevenLabs at natural/fast speed.
+    If speech is too long, speed it up enough to fit.
+    If speech is shorter, NEVER slow it down; pad the remaining section.
+    """
     original_duration = validate_audio(input_path)
+    usable_seconds = max(0.25, target_seconds - 0.10)
 
-    # Keep only a tiny safety tail. Speech itself is stretched/compressed to
-    # occupy almost the whole assigned section, preventing a long silent gap.
-    usable_seconds = max(0.25, target_seconds - 0.08)
-    speed_factor = original_duration / usable_seconds
+    if original_duration > usable_seconds:
+        speed_factor = original_duration / usable_seconds
+    else:
+        speed_factor = 1.0
 
     filters = atempo_filters_for_factor(speed_factor)
+
+    # A consistent Shorts-style loudness helps the narration feel more present.
     filters.extend([
+        "loudnorm=I=-14:TP=-1.5:LRA=7",
         f"apad=pad_dur={target_seconds:.3f}",
         f"atrim=duration={target_seconds:.3f}",
         "asetpts=N/SR/TB",
@@ -404,18 +427,18 @@ def fit_audio_to_exact_duration(input_path, output_path, target_seconds):
             "-c:a",
             "libmp3lame",
             "-b:a",
-            "128k",
+            "160k",
             "-ar",
             "44100",
             "-ac",
             "1",
             output_path,
         ],
-        f"Fitting voice to {target_seconds:.1f} seconds",
+        f"Fitting voice to {target_seconds:.1f}s without slowing",
     )
 
     final_duration = validate_audio(output_path)
-    if abs(final_duration - target_seconds) > 0.15:
+    if abs(final_duration - target_seconds) > 0.20:
         raise RuntimeError(
             f"Voice timing failed: expected {target_seconds}s, "
             f"got {final_duration:.3f}s"
@@ -425,6 +448,7 @@ def fit_audio_to_exact_duration(input_path, output_path, target_seconds):
         "original_duration": original_duration,
         "final_duration": final_duration,
         "speed_factor": speed_factor,
+        "slowed_down": False,
     }
 
 
@@ -446,7 +470,7 @@ def join_audio(main_path, cta_path, output_path):
             "-c:a",
             "libmp3lame",
             "-b:a",
-            "128k",
+            "160k",
             "-ar",
             "44100",
             "-ac",
@@ -457,7 +481,7 @@ def join_audio(main_path, cta_path, output_path):
     )
 
     duration = validate_audio(output_path)
-    if abs(duration - FINAL_AUDIO_SECONDS) > 0.15:
+    if abs(duration - FINAL_AUDIO_SECONDS) > 0.20:
         raise RuntimeError(
             f"Final voice is not 25 seconds: {duration:.3f}s"
         )
@@ -478,11 +502,14 @@ def generate_voice(
     if not text or not text.strip():
         raise ValueError("Voice text cannot be empty.")
 
-    clean_text = text.strip()
-    clean_cta = (
-        cta_text.strip()
+    clean_text = clean_spoken_text(text)
+    clean_cta = clean_spoken_text(
+        cta_text
         if cta_text and cta_text.strip()
-        else "Go to my channel description and click the Bot Activation button."
+        else (
+            "Go to my channel description and click "
+            "the Bot Activation button."
+        )
     )
 
     output_path = (
@@ -495,7 +522,10 @@ def generate_voice(
     os.makedirs(output_dir, exist_ok=True)
 
     metadata_path = os.path.splitext(output_path)[0] + ".json"
-    work_dir = tempfile.mkdtemp(prefix="voice_job_", dir=output_dir)
+    work_dir = tempfile.mkdtemp(
+        prefix="voice_job_",
+        dir=output_dir,
+    )
 
     raw_main = os.path.join(work_dir, "main_raw.mp3")
     raw_cta = os.path.join(work_dir, "cta_raw.mp3")
@@ -521,23 +551,25 @@ def generate_voice(
             require_elevenlabs=require_elevenlabs,
         )
 
-        # First remove long dead-air pauses created between sentences. Then
-        # normalize each segment to its exact video section.
         compact_silence(raw_main, compact_main)
         compact_silence(raw_cta, compact_cta)
 
-        main_timing = fit_audio_to_exact_duration(
+        main_timing = fit_audio_without_slowing(
             compact_main,
             fit_main,
             MAIN_AUDIO_SECONDS,
         )
-        cta_timing = fit_audio_to_exact_duration(
+        cta_timing = fit_audio_without_slowing(
             compact_cta,
             fit_cta,
             CTA_AUDIO_SECONDS,
         )
 
-        final_duration = join_audio(fit_main, fit_cta, output_path)
+        final_duration = join_audio(
+            fit_main,
+            fit_cta,
+            output_path,
+        )
 
         metadata = {
             "main_text": clean_text,
@@ -546,6 +578,7 @@ def generate_voice(
             "cta_provider": cta_provider,
             "main_timing": main_timing,
             "cta_timing": cta_timing,
+            "elevenlabs_speed": 1.08,
             "pause_compaction": {
                 "threshold_db": SILENCE_THRESHOLD_DB,
                 "long_pause_seconds": LONG_PAUSE_SECONDS,
@@ -558,11 +591,16 @@ def generate_voice(
         }
 
         with open(metadata_path, "w", encoding="utf-8") as file:
-            json.dump(metadata, file, indent=2, ensure_ascii=False)
+            json.dump(
+                metadata,
+                file,
+                indent=2,
+                ensure_ascii=False,
+            )
 
         print(
-            f"Voice complete: narration=0-20s, CTA=20-25s | "
-            f"providers={main_provider}/{cta_provider} | long pauses compressed",
+            "Voice complete: energetic ElevenLabs pacing, "
+            "no artificial slow-down, CTA=20-25s",
             flush=True,
         )
 
