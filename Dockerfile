@@ -6,8 +6,21 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
         wget \
+        fontconfig \
         fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
+
+# app/video.py uses this exact font path for the bold Shorts overlay.
+# Debian images can place DejaVu files differently, so resolve a real bold
+# DejaVu font during the image build and create the expected path if needed.
+RUN mkdir -p /usr/share/fonts/truetype/dejavu \
+    && if [ ! -f /usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf ]; then \
+         FONT_FILE="$(find /usr/share/fonts -type f \( -iname 'DejaVuSansCondensed-Bold.ttf' -o -iname 'DejaVuSans-Bold.ttf' -o -iname '*DejaVu*Bold*.ttf' \) | head -n 1)"; \
+         test -n "$FONT_FILE"; \
+         ln -sf "$FONT_FILE" /usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf; \
+       fi \
+    && test -f /usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf \
+    && fc-cache -f
 
 COPY requirements.txt .
 
