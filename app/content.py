@@ -14,12 +14,11 @@ import requests
 
 HISTORY_FILE = "/app/data/content_history.json"
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/"
-    "v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent"
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
+DEEPSEEK_URL = os.getenv(
+    "DEEPSEEK_URL",
+    "https://api.deepseek.com/chat/completions",
 )
 
 # Slightly longer scripts keep the first 20 seconds active at normal-fast
@@ -27,7 +26,7 @@ GEMINI_URL = (
 MIN_SCRIPT_WORDS = 50
 MAX_SCRIPT_WORDS = 66
 MAX_HISTORY = 1000
-GEMINI_ATTEMPTS = 6
+DEEPSEEK_ATTEMPTS = 4
 
 TITLE_KEYWORDS = [
     "Pocket Option AI Trading Bot",
@@ -463,7 +462,6 @@ def validate_content(
                 f"Forbidden phrase detected: {phrase}",
             )
 
-    # Retention scripts should stay punchy rather than becoming one long paragraph.
     sentences = [
         item.strip()
         for item in re.split(
@@ -483,66 +481,17 @@ def validate_content(
 
 
 # ============================================================
-# GEMINI
+# DEEPSEEK
 # ============================================================
 
-def extract_final_text(data):
-    try:
-        candidate = data["candidates"][0]
-    except Exception as exc:
-        raise RuntimeError(
-            f"Gemini response has no candidate: {str(data)[:1000]}"
-        ) from exc
-
-    if candidate.get("finishReason") == "MAX_TOKENS":
-        raise RuntimeError(
-            "Gemini hit MAX_TOKENS before finishing the response."
-        )
-
-    parts = candidate.get(
-        "content",
-        {},
-    ).get(
-        "parts",
-        [],
-    )
-
-    final_parts = []
-
-    for part in parts:
-        if (
-            not isinstance(part, dict)
-            or part.get("thought") is True
-        ):
-            continue
-
-        if part.get("text"):
-            final_parts.append(
-                part["text"]
-            )
-
-    if not final_parts:
-        raise RuntimeError(
-            "Gemini response did not contain final generated text."
-        )
-
-    return "".join(
-        final_parts
-    ).strip()
-
-
-def generate_with_gemini(
+def build_deepseek_prompt(
     history,
     target_keyword,
 ):
-    if not GEMINI_API_KEY:
-        raise RuntimeError(
-            "GEMINI_API_KEY is not configured."
-        )
-
+    # Enough history for strong variety without wasting tokens on every old Short.
     recent_titles = [
         item.get("title", "")
-        for item in history[-60:]
+        for item in history[-35:]
         if (
             isinstance(item, dict)
             and item.get("title")
@@ -551,14 +500,14 @@ def generate_with_gemini(
 
     recent_scripts = [
         item.get("script", "")
-        for item in history[-50:]
+        for item in history[-24:]
         if (
             isinstance(item, dict)
             and item.get("script")
         )
     ]
 
-    prompt = f"""
+    return f"""
 Create ONE high-retention YouTube Short title and ONE spoken script about Pocket Option trading automation.
 
 SEO TITLE RULES:
@@ -568,9 +517,10 @@ SEO TITLE RULES:
 
 VOICE SCRIPT RULES:
 - Write 52 to 62 words.
-- Make the delivery energetic, confident, and fast-moving, but truthful.
+- Make the delivery energetic, confident, punchy, and fast-moving, but truthful.
 - The FIRST sentence must be a short hook that grabs attention immediately.
 - Use 3 to 5 short spoken sentences.
+- Use natural spoken English for a fast ElevenLabs voiceover.
 - Avoid long academic explanations and filler.
 - Focus on ONE concrete chart idea: momentum, price action, market structure,
   candlesticks, support/resistance, indicators, volatility, signals,
@@ -589,65 +539,103 @@ RECENT TITLES TO AVOID:
 RECENT SCRIPTS TO AVOID:
 {chr(10).join("- " + script for script in recent_scripts) or "None"}
 
-Return only JSON with keys title and script.
-"""
+Return ONLY a valid JSON object exactly like this:
+{{"title":"...","script":"..."}}
+""".strip()
 
-    # Use the broadly supported generateContent JSON configuration.
-    # This also fixes the responseFormat/mimeType 400 seen in Railway logs.
+
+def generate_with_deepseek(
+    history,
+    target_keyword,
+):
+    if not DEEPSEEK_API_KEY:
+        raise RuntimeError(
+            "DEEPSEEK_API_KEY is not configured."
+        )
+
+    prompt = build_deepseek_prompt(
+        history,
+        target_keyword,
+    )
+
     payload = {
-        "contents": [
+        "model": DEEPSEEK_MODEL,
+        "messages": [
             {
-                "parts": [
-                    {
-                        "text": prompt,
-                    }
-                ]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 1.05,
-            "topP": 0.95,
-            "maxOutputTokens": 500,
-            "responseMimeType": "application/json",
-            "responseSchema": {
-                "type": "OBJECT",
-                "properties": {
-                    "title": {
-                        "type": "STRING",
-                    },
-                    "script": {
-                        "type": "STRING",
-                    },
-                },
-                "required": [
-                    "title",
-                    "script",
-                ],
+                "role": "system",
+                "content": (
+                    "You write high-retention YouTube Shorts scripts. "
+                    "Follow every constraint exactly and return JSON only."
+                ),
             },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        "thinking": {
+            "type": "disabled",
         },
+        "response_format": {
+            "type": "json_object",
+        },
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_tokens": 280,
+        "stream": False,
     }
 
     response = requests.post(
-        GEMINI_URL,
+        DEEPSEEK_URL,
         headers={
             "Content-Type": "application/json",
-            "x-goog-api-key": GEMINI_API_KEY,
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         },
         json=payload,
-        timeout=90,
+        timeout=75,
     )
 
     if response.status_code != 200:
+        retry_after = response.headers.get("Retry-After", "")
+        extra = f" retry-after={retry_after}" if retry_after else ""
         raise RuntimeError(
-            f"Gemini API error {response.status_code}: "
+            f"DeepSeek API error {response.status_code}:{extra} "
             f"{response.text[:1500]}"
         )
 
-    generated_text = clean_json_text(
-        extract_final_text(
-            response.json()
+    data = response.json()
+
+    try:
+        choice = data["choices"][0]
+        finish_reason = str(choice.get("finish_reason", ""))
+        generated_text = choice["message"]["content"]
+    except Exception as exc:
+        raise RuntimeError(
+            f"DeepSeek response missing generated content: {str(data)[:1500]}"
+        ) from exc
+
+    if finish_reason == "length":
+        raise RuntimeError(
+            "DeepSeek hit max_tokens before finishing the JSON response."
         )
+
+    if finish_reason in {
+        "content_filter",
+        "insufficient_system_resource",
+        "aborted",
+    }:
+        raise RuntimeError(
+            f"DeepSeek stopped with finish_reason={finish_reason}."
+        )
+
+    generated_text = clean_json_text(
+        generated_text
     )
+
+    if not generated_text:
+        raise RuntimeError(
+            "DeepSeek returned an empty response."
+        )
 
     try:
         result = json.loads(
@@ -655,7 +643,7 @@ Return only JSON with keys title and script.
         )
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            "Gemini returned invalid JSON: "
+            "DeepSeek returned invalid JSON: "
             f"{generated_text[:1500]}"
         ) from exc
 
@@ -800,6 +788,10 @@ def generate_content():
         flush=True,
     )
     print(
+        "Provider: DeepSeek Flash",
+        flush=True,
+    )
+    print(
         "==========================================",
         flush=True,
     )
@@ -822,15 +814,15 @@ def generate_content():
 
     for attempt in range(
         1,
-        GEMINI_ATTEMPTS + 1,
+        DEEPSEEK_ATTEMPTS + 1,
     ):
         try:
             print(
-                f"Gemini attempt {attempt}/{GEMINI_ATTEMPTS}",
+                f"DeepSeek attempt {attempt}/{DEEPSEEK_ATTEMPTS}",
                 flush=True,
             )
 
-            title, script = generate_with_gemini(
+            title, script = generate_with_deepseek(
                 history,
                 target_keyword,
             )
@@ -864,7 +856,7 @@ def generate_content():
                 continue
 
             print(
-                "NEW UNIQUE ENERGETIC TITLE + SCRIPT ACCEPTED",
+                "NEW UNIQUE DEEPSEEK TITLE + SCRIPT ACCEPTED",
                 flush=True,
             )
 
@@ -876,16 +868,19 @@ def generate_content():
 
         except Exception as exc:
             print(
-                f"Gemini attempt failed: {exc}",
+                f"DeepSeek attempt failed: {exc}",
                 flush=True,
             )
 
-            if attempt < GEMINI_ATTEMPTS:
-                time.sleep(2)
+            if attempt < DEEPSEEK_ATTEMPTS:
+                # Gentle backoff helps with temporary 429/5xx/API congestion.
+                time.sleep(
+                    min(2 ** attempt, 8)
+                )
 
     print(
-        "Gemini unavailable or duplicate-prone; "
-        "using high-retention unique fallback.",
+        "DeepSeek unavailable or duplicate-prone; "
+        "using high-retention unique local fallback.",
         flush=True,
     )
 
