@@ -342,7 +342,7 @@ def create_and_schedule_short(publish_at, reason="BUFFER"):
     print(f"[{reason}] Title: {title}", flush=True)
 
     cta_text = (
-        "Go to my channel description and click the Bot Activation button."
+        "Want a smarter chart workflow? Open the channel description and tap Bot Activation to see how the process works."
     )
     short_amount = random.randint(1000, 2000)
 
@@ -518,7 +518,7 @@ def create_and_upload_short():
     title, script = generate_content()
 
     cta_text = (
-        "Go to my channel description and click the Bot Activation button."
+        "Want a smarter chart workflow? Open the channel description and tap Bot Activation to see how the process works."
     )
     short_amount = random.randint(1000, 2000)
 

@@ -407,7 +407,7 @@ def choose_main_duration(raw_seconds):
     return random.randint(low, high) / FPS
 
 
-def fit_audio(input_path, output_path, target_seconds):
+def fit_audio(input_path, output_path, target_seconds, allow_slowdown=True):
     """Fit speech to its entire slot, never add a long silence before CTA."""
     original_duration = validate_audio(input_path)
     factor = original_duration / target_seconds
@@ -579,7 +579,7 @@ def generate_voice(
 
         print(
             "Voice complete: energetic ElevenLabs pacing, "
-            f"continuous speech, CTA={main_seconds:.3f}-{final_seconds:.3f}s",
+            f"continuous speech, natural-speed CTA={main_seconds:.3f}-{final_seconds:.3f}s",
             flush=True,
         )
 

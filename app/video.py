@@ -297,7 +297,7 @@ def escape_drawtext(value):
 
 def opening_overlay(short_amount):
     amount_text = escape_drawtext(
-        f"I MADE: ${short_amount{'}'} EVERY DAY"
+        f"I MADE: ${short_amount} EVERY DAY"
     )
     link_text = escape_drawtext("LINK IN BIO")
     font_file = escape_drawtext(OVERLAY_FONT_FILE)
