@@ -295,45 +295,43 @@ def escape_drawtext(value):
     )
 
 
-def opening_headline(script):
-    text = script.lower()
-    choices = [
-        (("volume", "activity"), ("SPOT THE SURGE", "CHECK THE CONTEXT")),
-        (("breakout", "break"), ("BEFORE THE BREAKOUT", "CHECK THIS FIRST")),
-        (("momentum", "speed"), ("MOMENTUM CAN SHIFT", "WATCH THE CLUES")),
-        (("support", "resistance", "level"), ("KEY LEVELS MATTER", "WATCH THE REACTION")),
-        (("reversal", "trend"), ("IS THE TREND FADING?", "READ THE CLUES")),
-        (("candle", "pattern"), ("READ THE CANDLES", "SEE THE BIG PICTURE")),
-    ]
-    for keywords, lines in choices:
-        if any(word in text for word in keywords):
-            return lines
-    return ("READ THE CHART", "CHECK THE CONTEXT")
+def opening_overlay(short_amount):
+    amount_text = escape_drawtext(
+        f"I MADE: ${short_amount{'}'} EVERY DAY"
+    )
+    link_text = escape_drawtext("LINK IN BIO")
+    font_file = escape_drawtext(OVERLAY_FONT_FILE)
 
-
-def opening_overlay(script):
-    line1, line2 = opening_headline(script)
-    font = escape_drawtext(OVERLAY_FONT_FILE)
-    show = "enable='lt(t,5)'"
-    alpha = "alpha='min(1,t/0.18)*min(1,(5-t)/0.18)'"
-    layers = [
-        "[joined]drawbox=x=70:y=146:w=940:h=300:color=0x07111E@0.90:t=fill:" + show,
-        "drawbox=x=70:y=146:w=6:h=300:color=0xB9F648:t=fill:" + show,
-        "drawbox=x=108:y=369:w=860:h=1:color=white@0.18:t=fill:" + show,
-    ]
-    for text, size, y, color in [
-        ("POCKET OPTION  /  AI ANALYSIS", 24, 176, "0xB9F648"),
-        (line1, 56, 226, "white"),
-        (line2, 56, 293, "white"),
-        ("SEE HOW IT WORKS", 26, 395, "0xFFD16B"),
-    ]:
-        layers.append(
-            f"drawtext=fontfile='{font}':text='{escape_drawtext(text)}':"
-            f"expansion=none:fontsize={size}:fontcolor={color}:"
-            f"x=108:y={y}:shadowcolor=black@0.25:shadowx=1:shadowy=2:"
-            + alpha + ":" + show
-        )
-    return ",".join(layers) + "[outv]"
+    return (
+        "[joined]"
+        "drawtext="
+        f"fontfile='{font_file}':"
+        f"text='{amount_text}':"
+        "fontcolor=0x7CFC00:"
+        "fontsize=54:"
+        "borderw=5:"
+        "bordercolor=black:"
+        "shadowcolor=black@0.85:"
+        "shadowx=2:"
+        "shadowy=2:"
+        "x=(w-text_w)/2:"
+        "y=125:"
+        "enable='between(t,0,5)',"
+        "drawtext="
+        f"fontfile='{font_file}':"
+        f"text='{link_text}':"
+        "fontcolor=0xFFF200:"
+        "fontsize=58:"
+        "borderw=5:"
+        "bordercolor=black:"
+        "shadowcolor=black@0.85:"
+        "shadowx=2:"
+        "shadowy=2:"
+        "x=(w-text_w)/2:"
+        "y=195:"
+        "enable='between(t,0,5)'"
+        "[outv]"
+    )
 
 
 # ============================================================
@@ -517,7 +515,7 @@ def build_silent_video(
         "v=1:a=0[joined]"
     )
 
-    filters.append(opening_overlay(script))
+    filters.append(opening_overlay(short_amount))
 
     command = [
         "ffmpeg",
@@ -707,7 +705,7 @@ def generate_video(
             flush=True,
         )
         print(
-            "Overlay: editorial hook card, white headline, lime accent, amber cue",
+            "Overlay: original green earnings headline and yellow LINK IN BIO",
             flush=True,
         )
         print(
@@ -762,4 +760,3 @@ def generate_video(
             temp_dir,
             ignore_errors=True,
         )
-
