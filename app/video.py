@@ -15,9 +15,10 @@ ASSETS_DIR = "/app/assets/footage"
 OUTPUT_DIR = "/app/output"
 
 NUMBER_OF_CLIPS = 4
-CLIP_DURATION = 5.0
 CTA_DURATION = 5.0
-FINAL_VIDEO_DURATION = 25.0
+MIN_VIDEO_DURATION = 20.0
+MAX_VIDEO_DURATION = 26.0
+FPS = 30
 OPENING_TEXT_DURATION = 5.0
 
 CTA_SOURCE = os.path.join(
@@ -27,7 +28,7 @@ CTA_SOURCE = os.path.join(
 
 OVERLAY_FONT_FILE = (
     "/usr/share/fonts/truetype/dejavu/"
-    "DejaVuSansCondensed-Bold.ttf"
+    "DejaVuSans-Bold.ttf"
 )
 
 RANDOM_VIDEO_FILES = [
@@ -231,7 +232,7 @@ def validate_voice(voice_path):
     return duration
 
 
-def validate_final_video(output_path):
+def validate_final_video(output_path, expected_duration=25.0):
     if not os.path.exists(
         output_path
     ):
@@ -267,10 +268,10 @@ def validate_final_video(output_path):
     )
 
     if abs(
-        duration - FINAL_VIDEO_DURATION
+        duration - expected_duration
     ) > 0.20:
         raise RuntimeError(
-            "FINAL VIDEO IS NOT 25 SECONDS: "
+            f"FINAL VIDEO DOES NOT MATCH {expected_duration:.3f}s: "
             f"{duration:.3f}"
         )
 
@@ -292,6 +293,47 @@ def escape_drawtext(value):
         .replace("'", "\\'")
         .replace("%", "\\%")
     )
+
+
+def opening_headline(script):
+    text = script.lower()
+    choices = [
+        (("volume", "activity"), ("SPOT THE SURGE", "CHECK THE CONTEXT")),
+        (("breakout", "break"), ("BEFORE THE BREAKOUT", "CHECK THIS FIRST")),
+        (("momentum", "speed"), ("MOMENTUM CAN SHIFT", "WATCH THE CLUES")),
+        (("support", "resistance", "level"), ("KEY LEVELS MATTER", "WATCH THE REACTION")),
+        (("reversal", "trend"), ("IS THE TREND FADING?", "READ THE CLUES")),
+        (("candle", "pattern"), ("READ THE CANDLES", "SEE THE BIG PICTURE")),
+    ]
+    for keywords, lines in choices:
+        if any(word in text for word in keywords):
+            return lines
+    return ("READ THE CHART", "CHECK THE CONTEXT")
+
+
+def opening_overlay(script):
+    line1, line2 = opening_headline(script)
+    font = escape_drawtext(OVERLAY_FONT_FILE)
+    show = "enable='lt(t,5)'"
+    alpha = "alpha='min(1,t/0.18)*min(1,(5-t)/0.18)'"
+    layers = [
+        "[joined]drawbox=x=70:y=146:w=940:h=300:color=0x07111E@0.90:t=fill:" + show,
+        "drawbox=x=70:y=146:w=6:h=300:color=0xB9F648:t=fill:" + show,
+        "drawbox=x=108:y=369:w=860:h=1:color=white@0.18:t=fill:" + show,
+    ]
+    for text, size, y, color in [
+        ("POCKET OPTION  /  AI ANALYSIS", 24, 176, "0xB9F648"),
+        (line1, 56, 226, "white"),
+        (line2, 56, 293, "white"),
+        ("SEE HOW IT WORKS", 26, 395, "0xFFD16B"),
+    ]:
+        layers.append(
+            f"drawtext=fontfile='{font}':text='{escape_drawtext(text)}':"
+            f"expansion=none:fontsize={size}:fontcolor={color}:"
+            f"x=108:y={y}:shadowcolor=black@0.25:shadowx=1:shadowy=2:"
+            + alpha + ":" + show
+        )
+    return ",".join(layers) + "[outv]"
 
 
 # ============================================================
@@ -373,6 +415,8 @@ def build_silent_video(
     selected_clips,
     short_amount,
     output_path,
+    final_seconds=25.0,
+    script="",
 ):
     if not os.path.exists(
         CTA_SOURCE
@@ -392,19 +436,23 @@ def build_silent_video(
             f"Overlay font is missing: {OVERLAY_FONT_FILE}"
         )
 
+    main_frames = round((final_seconds - CTA_DURATION) * FPS)
+    clip_frames = [main_frames // NUMBER_OF_CLIPS + (i < main_frames % NUMBER_OF_CLIPS)
+                   for i in range(NUMBER_OF_CLIPS)]
     input_args = []
     filters = []
 
     for index, clip in enumerate(
         selected_clips
     ):
+        clip_duration = clip_frames[index] / FPS
         duration = validate_clip(
             clip
         )
 
         max_start = max(
             0.0,
-            duration - CLIP_DURATION,
+            duration - clip_duration,
         )
 
         start = (
@@ -430,8 +478,8 @@ def build_silent_video(
                 index,
                 f"v{index}",
                 (
-                    f"trim=start={start:.3f}:"
-                    f"duration={CLIP_DURATION:.3f}"
+                    f"trim=start={start:.3f},setpts=PTS-STARTPTS,fps=30,"
+                    f"trim=end_frame={clip_frames[index]}"
                 ),
             )
         )
@@ -452,7 +500,7 @@ def build_silent_video(
         quality_filter(
             cta_input_index,
             "vcta",
-            f"trim=duration={CTA_DURATION:.3f}",
+            "fps=30,trim=end_frame=150",
         )
     )
 
@@ -469,48 +517,7 @@ def build_silent_video(
         "v=1:a=0[joined]"
     )
 
-    amount_text = escape_drawtext(
-        f"I MADE: ${short_amount} EVERY DAY"
-    )
-    link_text = escape_drawtext(
-        "LINK IN BIO"
-    )
-    font_file = escape_drawtext(
-        OVERLAY_FONT_FILE
-    )
-
-    # Smaller, cleaner version of the reference style:
-    # neon green + yellow, black outline, no oversized text.
-    filters.append(
-        "[joined]"
-        "drawtext="
-        f"fontfile='{font_file}':"
-        f"text='{amount_text}':"
-        "fontcolor=0x7CFC00:"
-        "fontsize=54:"
-        "borderw=5:"
-        "bordercolor=black:"
-        "shadowcolor=black@0.85:"
-        "shadowx=2:"
-        "shadowy=2:"
-        "x=(w-text_w)/2:"
-        "y=125:"
-        "enable='between(t,0,5)',"
-        "drawtext="
-        f"fontfile='{font_file}':"
-        f"text='{link_text}':"
-        "fontcolor=0xFFF200:"
-        "fontsize=58:"
-        "borderw=5:"
-        "bordercolor=black:"
-        "shadowcolor=black@0.85:"
-        "shadowx=2:"
-        "shadowy=2:"
-        "x=(w-text_w)/2:"
-        "y=195:"
-        "enable='between(t,0,5)'"
-        "[outv]"
-    )
+    filters.append(opening_overlay(script))
 
     command = [
         "ffmpeg",
@@ -523,7 +530,7 @@ def build_silent_video(
         "-map",
         "[outv]",
         "-t",
-        f"{FINAL_VIDEO_DURATION:.3f}",
+        f"{final_seconds:.9f}",
         "-an",
         "-c:v",
         "libx264",
@@ -554,10 +561,10 @@ def build_silent_video(
     )
 
     if abs(
-        duration - FINAL_VIDEO_DURATION
+        duration - final_seconds
     ) > 0.20:
         raise RuntimeError(
-            "Silent video is not 25 seconds: "
+            "Silent video does not match the speech timeline: "
             f"{duration:.3f}"
         )
 
@@ -568,17 +575,18 @@ def mux_audio(
     video_path,
     voice_path,
     output_path,
+    final_seconds=25.0,
 ):
     voice_duration = validate_voice(
         voice_path
     )
 
     if abs(
-        voice_duration - FINAL_VIDEO_DURATION
+        voice_duration - final_seconds
     ) > 0.20:
         print(
             f"WARNING: voice duration is {voice_duration:.3f}s; "
-            "mux will enforce 25 seconds.",
+            f"mux will enforce {final_seconds:.3f} seconds.",
             flush=True,
         )
 
@@ -595,7 +603,7 @@ def mux_audio(
             "-map",
             "1:a:0",
             "-t",
-            f"{FINAL_VIDEO_DURATION:.3f}",
+            f"{final_seconds:.9f}",
             "-c:v",
             "copy",
             "-c:a",
@@ -607,8 +615,7 @@ def mux_audio(
             "-ac",
             "2",
             "-af",
-            "apad=pad_dur=25,"
-            "atrim=duration=25",
+            f"apad=pad_dur=0.05,atrim=duration={final_seconds:.9f}",
             "-movflags",
             "+faststart",
             output_path,
@@ -629,7 +636,15 @@ def generate_video(
     short_amount=1000,
     output_filename="short.mp4",
 ):
-    del script
+    metadata_path = os.path.splitext(voice_path or "")[0] + ".json"
+    with open(metadata_path, encoding="utf-8") as file:
+        timeline = json.load(file)
+    final_seconds = float(timeline["final_duration"])
+    cta_start = float(timeline["cta_start"])
+    if not MIN_VIDEO_DURATION <= final_seconds <= MAX_VIDEO_DURATION:
+        raise RuntimeError("Short duration must be between 20 and 26 seconds")
+    if abs(final_seconds - cta_start - CTA_DURATION) > 0.001:
+        raise RuntimeError("CTA must occupy exactly the final five seconds")
 
     os.makedirs(
         OUTPUT_DIR,
@@ -667,11 +682,11 @@ def generate_video(
 
     silent_path = os.path.join(
         temp_dir,
-        "silent_25.mp4",
+        "silent.mp4",
     )
     muxed_path = os.path.join(
         temp_dir,
-        "final_25.mp4",
+        "final.mp4",
     )
 
     try:
@@ -680,11 +695,11 @@ def generate_video(
             flush=True,
         )
         print(
-            "GENERATING HIGH-QUALITY 25-SECOND SHORT",
+            f"GENERATING HIGH-QUALITY {final_seconds:.3f}-SECOND SHORT",
             flush=True,
         )
         print(
-            "4 RANDOM clips x 5s + FIXED CTA x 5s",
+            f"4 RANDOM clips across {cta_start:.3f}s + FIXED CTA x 5s",
             flush=True,
         )
         print(
@@ -692,7 +707,7 @@ def generate_video(
             flush=True,
         )
         print(
-            "Overlay: smaller high-contrast green/yellow text",
+            "Overlay: editorial hook card, white headline, lime accent, amber cue",
             flush=True,
         )
         print(
@@ -704,16 +719,19 @@ def generate_video(
             selected_clips,
             short_amount,
             silent_path,
+            final_seconds=final_seconds,
+            script=script,
         )
 
         mux_audio(
             silent_path,
             voice_path,
             muxed_path,
+            final_seconds=final_seconds,
         )
 
         validate_final_video(
-            muxed_path
+            muxed_path, final_seconds
         )
 
         if os.path.exists(
@@ -729,7 +747,7 @@ def generate_video(
         )
 
         validate_final_video(
-            final_path
+            final_path, final_seconds
         )
 
         print(
@@ -744,3 +762,4 @@ def generate_video(
             temp_dir,
             ignore_errors=True,
         )
+

@@ -2,6 +2,8 @@ import base64
 import json
 import os
 import re
+import random
+import math
 import shutil
 import subprocess
 import tempfile
@@ -18,7 +20,7 @@ ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 
 VOICE_ID = os.getenv(
     "ELEVENLABS_VOICE_ID",
-    "JBFqnCBsd6RMkjVDRZzb",
+    "nPczCjzI2devNBz1zQrb",
 )
 
 MODEL_ID = os.getenv(
@@ -31,16 +33,17 @@ PIPER_MODEL = os.getenv(
     "/app/voices/en_US-lessac-medium.onnx",
 )
 
-MAIN_AUDIO_SECONDS = 20.0
 CTA_AUDIO_SECONDS = 5.0
-FINAL_AUDIO_SECONDS = 25.0
+FPS = 30
+MIN_MAIN_FRAMES = 15 * FPS
+MAX_MAIN_FRAMES = 21 * FPS
 ELEVENLABS_RETRIES = 3
 
 # Retention-first pacing: remove dead air, but never slow the voice down
 # just to fill the 20-second narration section.
-SILENCE_THRESHOLD_DB = -48
-LONG_PAUSE_SECONDS = 0.20
-KEPT_PAUSE_SECONDS = 0.06
+SILENCE_THRESHOLD_DB = -45
+LONG_PAUSE_SECONDS = 0.12
+KEPT_PAUSE_SECONDS = 0.025
 
 
 # ============================================================
@@ -151,7 +154,7 @@ def clean_spoken_text(text):
 # ELEVENLABS
 # ============================================================
 
-def elevenlabs_tts(text, output_path):
+def elevenlabs_tts(text, output_path, previous_text=None, next_text=None):
     api_key = os.getenv("ELEVENLABS_API_KEY")
 
     if not api_key:
@@ -175,14 +178,19 @@ def elevenlabs_tts(text, output_path):
         "model_id": MODEL_ID,
         "voice_settings": {
             # More expressive, energetic delivery without sounding unstable.
-            "stability": 0.36,
+            "stability": 0.40,
             "similarity_boost": 0.84,
-            "style": 0.30,
+            "style": 0.18,
             "use_speaker_boost": True,
             # Noticeably faster than the old voice, while staying natural.
             "speed": 1.08,
         },
     }
+
+    if previous_text:
+        payload["previous_text"] = previous_text
+    if next_text:
+        payload["next_text"] = next_text
 
     last_error = None
 
@@ -303,10 +311,10 @@ def piper_tts(text, output_path):
         safe_remove(wav_path)
 
 
-def generate_raw_segment(text, output_path, require_elevenlabs=False):
+def generate_raw_segment(text, output_path, require_elevenlabs=False, **context):
     try:
         if os.getenv("ELEVENLABS_API_KEY"):
-            elevenlabs_tts(text, output_path)
+            elevenlabs_tts(text, output_path, **context)
             print("Voice provider: ElevenLabs", flush=True)
             return "elevenlabs"
     except Exception as exc:
@@ -340,7 +348,9 @@ def compact_silence(input_path, output_path):
         f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
         f"stop_periods=-1:stop_duration={LONG_PAUSE_SECONDS:.2f}:"
         f"stop_threshold={SILENCE_THRESHOLD_DB}dB:"
-        f"stop_silence={KEPT_PAUSE_SECONDS:.2f}"
+        f"stop_silence={KEPT_PAUSE_SECONDS:.3f},"
+        "areverse,silenceremove=start_periods=1:start_duration=0:"
+        f"start_threshold={SILENCE_THRESHOLD_DB}dB,areverse"
     )
 
     run_command(
@@ -353,16 +363,14 @@ def compact_silence(input_path, output_path):
             "-af",
             silence_filter,
             "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "128k",
+            "pcm_s16le",
             "-ar",
             "44100",
             "-ac",
             "1",
             output_path,
         ],
-        "Compressing long narration pauses",
+        "Removing dead air and trimming speech edges",
     )
 
     validate_audio(output_path)
@@ -387,105 +395,67 @@ def atempo_filters_for_factor(speed_factor):
     return filters
 
 
-def fit_audio_without_slowing(
-    input_path,
-    output_path,
-    target_seconds,
-):
-    """
-    Keep ElevenLabs at natural/fast speed.
-    If speech is too long, speed it up enough to fit.
-    If speech is shorter, NEVER slow it down; pad the remaining section.
-    """
+def choose_main_duration(raw_seconds):
+    """Random frame-aligned length, with no slowdown or excessive rushing."""
+    low = max(MIN_MAIN_FRAMES, math.ceil(raw_seconds / 1.30 * FPS))
+    high = min(MAX_MAIN_FRAMES, math.floor(raw_seconds * FPS))
+    if low > high:
+        raise RuntimeError(
+            f"Narration length {raw_seconds:.2f}s cannot fit a 20-26s Short "
+            "at natural-to-fast speed. Regenerate the script."
+        )
+    return random.randint(low, high) / FPS
+
+
+def fit_audio(input_path, output_path, target_seconds):
+    """Fit speech to its entire slot, never add a long silence before CTA."""
     original_duration = validate_audio(input_path)
-    usable_seconds = max(0.25, target_seconds - 0.10)
-
-    if original_duration > usable_seconds:
-        speed_factor = original_duration / usable_seconds
-    else:
-        speed_factor = 1.0
-
-    filters = atempo_filters_for_factor(speed_factor)
-
-    # A consistent Shorts-style loudness helps the narration feel more present.
-    filters.extend([
+    factor = original_duration / target_seconds
+    filters = atempo_filters_for_factor(factor)
+    filters += [
+        "aresample=44100",
         "loudnorm=I=-14:TP=-1.5:LRA=7",
-        f"apad=pad_dur={target_seconds:.3f}",
-        f"atrim=duration={target_seconds:.3f}",
+        "aresample=44100",
+        # Only compensates for atempo's few milliseconds of rounding.
+        "apad=pad_dur=0.05",
+        f"atrim=end_sample={round(target_seconds * 44100)}",
         "asetpts=N/SR/TB",
-    ])
-
-    run_command(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            input_path,
-            "-vn",
-            "-af",
-            ",".join(filters),
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "160k",
-            "-ar",
-            "44100",
-            "-ac",
-            "1",
-            output_path,
-        ],
-        f"Fitting voice to {target_seconds:.1f}s without slowing",
-    )
-
-    final_duration = validate_audio(output_path)
-    if abs(final_duration - target_seconds) > 0.20:
-        raise RuntimeError(
-            f"Voice timing failed: expected {target_seconds}s, "
-            f"got {final_duration:.3f}s"
-        )
-
-    return {
-        "original_duration": original_duration,
-        "final_duration": final_duration,
-        "speed_factor": speed_factor,
-        "slowed_down": False,
-    }
-
-
-def join_audio(main_path, cta_path, output_path):
-    run_command(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            main_path,
-            "-i",
-            cta_path,
-            "-filter_complex",
-            "[0:a][1:a]concat=n=2:v=0:a=1[a]",
-            "-map",
-            "[a]",
-            "-t",
-            f"{FINAL_AUDIO_SECONDS:.3f}",
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "160k",
-            "-ar",
-            "44100",
-            "-ac",
-            "1",
-            output_path,
-        ],
-        "Joining 20-second narration + 5-second CTA audio",
-    )
-
+    ]
+    run_command([
+        "ffmpeg", "-y", "-i", input_path, "-vn", "-af", ",".join(filters),
+        "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "1", output_path,
+    ], f"Fitting continuous speech to {target_seconds:.3f}s")
     duration = validate_audio(output_path)
-    if abs(duration - FINAL_AUDIO_SECONDS) > 0.20:
-        raise RuntimeError(
-            f"Final voice is not 25 seconds: {duration:.3f}s"
-        )
+    if abs(duration - target_seconds) > 0.04:
+        raise RuntimeError(f"Speech timing mismatch: {duration} vs {target_seconds}")
+    return {"original_duration": original_duration, "final_duration": duration,
+            "speed_factor": factor, "slowed_down": factor < 0.999}
 
+
+def verify_cta_join(path, cta_start):
+    result = run_command([
+        "ffmpeg", "-hide_banner", "-i", path, "-af",
+        "silencedetect=noise=-45dB:d=0.12", "-f", "null", "-",
+    ], "Checking narration-to-CTA transition for dead air")
+    starts = re.findall(r"silence_start: ([0-9.]+)", result.stderr)
+    ends = re.findall(r"silence_end: ([0-9.]+)", result.stderr)
+    for start, end in zip(starts, ends):
+        if float(start) < cta_start + 0.06 and float(end) > cta_start - 0.06:
+            raise RuntimeError(f"Dead air at CTA transition: {start}-{end}s")
+    print(f"CTA JOIN VERIFIED | start={cta_start:.3f}s | no gap >=120ms", flush=True)
+
+
+def join_audio(main_path, cta_path, output_path, final_seconds, cta_start):
+    run_command([
+        "ffmpeg", "-y", "-i", main_path, "-i", cta_path,
+        "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[a]",
+        "-map", "[a]", "-c:a", "libmp3lame", "-b:a", "192k",
+        "-ar", "44100", "-ac", "1", output_path,
+    ], "Joining narration directly into the fixed 5-second CTA")
+    duration = validate_audio(output_path)
+    if abs(duration - final_seconds) > 0.10:
+        raise RuntimeError(f"Final audio timing mismatch: {duration} vs {final_seconds}")
+    verify_cta_join(output_path, cta_start)
     return duration
 
 
@@ -497,7 +467,7 @@ def generate_voice(
     text: str,
     cta_text: str = "",
     output_filename: str = "voice.mp3",
-    require_elevenlabs: bool = False,
+    require_elevenlabs: bool = True,
 ) -> str:
     if not text or not text.strip():
         raise ValueError("Voice text cannot be empty.")
@@ -529,10 +499,10 @@ def generate_voice(
 
     raw_main = os.path.join(work_dir, "main_raw.mp3")
     raw_cta = os.path.join(work_dir, "cta_raw.mp3")
-    compact_main = os.path.join(work_dir, "main_compact.mp3")
-    compact_cta = os.path.join(work_dir, "cta_compact.mp3")
-    fit_main = os.path.join(work_dir, "main_20.mp3")
-    fit_cta = os.path.join(work_dir, "cta_5.mp3")
+    compact_main = os.path.join(work_dir, "main_compact.wav")
+    compact_cta = os.path.join(work_dir, "cta_compact.wav")
+    fit_main = os.path.join(work_dir, "main_fitted.wav")
+    fit_cta = os.path.join(work_dir, "cta_fitted.wav")
 
     print("\n===== VOICE GENERATION =====", flush=True)
     print(f"Main script: {clean_text}", flush=True)
@@ -544,22 +514,27 @@ def generate_voice(
             clean_text,
             raw_main,
             require_elevenlabs=require_elevenlabs,
+            next_text=clean_cta,
         )
         cta_provider = generate_raw_segment(
             clean_cta,
             raw_cta,
             require_elevenlabs=require_elevenlabs,
+            previous_text=clean_text,
         )
 
         compact_silence(raw_main, compact_main)
         compact_silence(raw_cta, compact_cta)
 
-        main_timing = fit_audio_without_slowing(
+        main_seconds = choose_main_duration(audio_duration(compact_main))
+        final_seconds = main_seconds + CTA_AUDIO_SECONDS
+        print(f"RANDOM TIMELINE | total={final_seconds:.3f}s | main={main_seconds:.3f}s | CTA=5.000s", flush=True)
+        main_timing = fit_audio(
             compact_main,
             fit_main,
-            MAIN_AUDIO_SECONDS,
+            main_seconds,
         )
-        cta_timing = fit_audio_without_slowing(
+        cta_timing = fit_audio(
             compact_cta,
             fit_cta,
             CTA_AUDIO_SECONDS,
@@ -569,6 +544,8 @@ def generate_voice(
             fit_main,
             fit_cta,
             output_path,
+            final_seconds,
+            main_seconds,
         )
 
         metadata = {
@@ -584,9 +561,11 @@ def generate_voice(
                 "long_pause_seconds": LONG_PAUSE_SECONDS,
                 "kept_pause_seconds": KEPT_PAUSE_SECONDS,
             },
-            "cta_start": 20.0,
-            "cta_end": 25.0,
-            "final_duration": final_duration,
+            "cta_start": main_seconds,
+            "cta_end": final_seconds,
+            "final_duration": final_seconds,
+            "encoded_audio_duration": final_duration,
+            "voice_id": VOICE_ID,
             "require_elevenlabs": require_elevenlabs,
         }
 
@@ -600,7 +579,7 @@ def generate_voice(
 
         print(
             "Voice complete: energetic ElevenLabs pacing, "
-            "no artificial slow-down, CTA=20-25s",
+            f"continuous speech, CTA={main_seconds:.3f}-{final_seconds:.3f}s",
             flush=True,
         )
 
@@ -608,3 +587,4 @@ def generate_voice(
 
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+

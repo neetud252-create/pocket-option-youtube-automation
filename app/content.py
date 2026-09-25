@@ -475,7 +475,7 @@ def validate_content(
         return False, "Script needs at least 3 short spoken sentences."
 
     if len(sentences) > 6:
-        return False, "Script has too many sentences for a 20-second Short."
+        return False, "Script has too many sentences for a short narration."
 
     return True, "OK"
 
@@ -516,9 +516,16 @@ SEO TITLE RULES:
 - Keep the title under 100 characters.
 
 VOICE SCRIPT RULES:
-- Write 52 to 62 words.
+- Write 56 to 64 words. The voiceover will set a natural 15-to-21-second narration window.
 - Make the delivery energetic, confident, punchy, and fast-moving, but truthful.
-- The FIRST sentence must be a short hook that grabs attention immediately.
+- The FIRST sentence is a 4-to-8-word curiosity hook about a concrete chart clue.
+- Start with a surprising contrast, a visual detail, or a common chart-reading mistake.
+- Never open with generic filler such as "Look at this chart", "Here is", or "Watch this setup".
+- Structure: specific hook, what to notice, why one clue can mislead, then a useful takeaway.
+- Address the viewer as "you" and use crisp active verbs. Vary sentence lengths for rhythm.
+- End on the takeaway, with no sign-off or filler, so the fixed CTA can follow immediately.
+- Explain chart-reading ideas without inventing capabilities of this particular bot.
+- Do not imply footage proves a real trade, real earnings, or an unverified live result.
 - Use 3 to 5 short spoken sentences.
 - Use natural spoken English for a fast ElevenLabs voiceover.
 - Avoid long academic explanations and filler.
@@ -919,3 +926,4 @@ def generate_content():
         script,
         history,
     )
+
