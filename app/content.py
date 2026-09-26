@@ -518,12 +518,18 @@ SEO TITLE RULES:
 VOICE SCRIPT RULES:
 - Write 56 to 64 words. The voiceover will set a natural 15-to-21-second narration window.
 - Make the delivery energetic, confident, punchy, and fast-moving, but truthful.
-- The FIRST sentence is a 4-to-8-word curiosity hook about a concrete chart clue.
-- Start with a surprising contrast, a visual detail, or a common chart-reading mistake.
-- Never open with generic filler such as "Look at this chart", "Here is", or "Watch this setup".
-- Structure: specific hook, what to notice, why one clue can mislead, then a useful takeaway.
-- Address the viewer as "you" and use crisp active verbs. Vary sentence lengths for rhythm.
-- End on the takeaway, with no sign-off or filler, so the fixed CTA can follow immediately.
+- Use this RETENTION FORMAT on every Short, but write completely different wording and ideas every time:
+  1) Open with a punchy trader pain-point question or problem hook.
+  2) Follow with 2 to 4 very short relatable pain points or rapid questions.
+  3) Pivot quickly to how the AI bot analyzes or organizes market/chart information.
+  4) Deliver several short, punchy benefit lines about signals, market data, chart context, or decision support.
+  5) End with a strong momentum-building takeaway so the fixed CTA can follow immediately.
+- The user's example is STYLE ONLY. NEVER copy its sentences, hooks, wording, or simply swap synonyms.
+- Every generated script must have a genuinely different hook, pain points, benefit sequence, and phrasing from recent scripts.
+- Use rapid spoken rhythm: question. short statement. short statement. question. solution. benefits. takeaway.
+- Address the viewer as "you" and use crisp active verbs.
+- Keep claims truthful: describe analysis, signals, chart context, or decision support; never claim the bot predicts the future, gives exact winning entries/exits, or makes viewers win.
+- End on the takeaway, with no sign-off or CTA, because the fixed CTA follows immediately.
 - Explain chart-reading ideas without inventing capabilities of this particular bot.
 - Do not imply footage proves a real trade, real earnings, or an unverified live result.
 - Use 3 to 5 short spoken sentences.
