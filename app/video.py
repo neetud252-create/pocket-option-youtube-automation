@@ -648,3 +648,140 @@ def mux_audio(
         flush=True,
     )
     return output_path
+
+# ============================================================
+# PUBLIC GENERATOR
+# ============================================================
+
+def generate_video(
+    script="",
+    voice_path=None,
+    short_amount=1000,
+    output_filename="short.mp4",
+):
+    metadata_path = os.path.splitext(voice_path or "")[0] + ".json"
+    with open(metadata_path, encoding="utf-8") as file:
+        timeline = json.load(file)
+    final_seconds = float(timeline["final_duration"])
+    cta_start = float(timeline["cta_start"])
+    if not MIN_VIDEO_DURATION <= final_seconds <= MAX_VIDEO_DURATION:
+        raise RuntimeError("Short duration must be between 20 and 26 seconds")
+    if abs(final_seconds - cta_start - CTA_DURATION) > 0.001:
+        raise RuntimeError("CTA must occupy exactly the final five seconds")
+
+    os.makedirs(
+        OUTPUT_DIR,
+        exist_ok=True,
+    )
+
+    if not voice_path:
+        raise RuntimeError(
+            "voice_path was not provided."
+        )
+
+    validate_voice(
+        voice_path
+    )
+
+    selected_clips = select_random_clips()
+
+    job_id = uuid.uuid4().hex[:12]
+
+    temp_dir = tempfile.mkdtemp(
+        prefix=f"video_job_{job_id}_",
+        dir=OUTPUT_DIR,
+    )
+
+    final_path = (
+        output_filename
+        if os.path.isabs(
+            output_filename
+        )
+        else os.path.join(
+            OUTPUT_DIR,
+            output_filename,
+        )
+    )
+
+    silent_path = os.path.join(
+        temp_dir,
+        "silent.mp4",
+    )
+    muxed_path = os.path.join(
+        temp_dir,
+        "final.mp4",
+    )
+
+    try:
+        print(
+            "\n==================================================",
+            flush=True,
+        )
+        print(
+            f"GENERATING HIGH-QUALITY {final_seconds:.3f}-SECOND SHORT",
+            flush=True,
+        )
+        print(
+            f"4 RANDOM clips across {cta_start:.3f}s + FIXED CTA x 5s",
+            flush=True,
+        )
+        print(
+            "Output: 1080x1920, H.264 High, CRF 17, 30 FPS",
+            flush=True,
+        )
+        print(
+            "Overlay: original green earnings headline and yellow LINK IN BIO",
+            flush=True,
+        )
+        print(
+            "==================================================",
+            flush=True,
+        )
+
+        build_silent_video(
+            selected_clips,
+            short_amount,
+            silent_path,
+            final_seconds=final_seconds,
+            script=script,
+        )
+
+        mux_audio(
+            silent_path,
+            voice_path,
+            muxed_path,
+            final_seconds=final_seconds,
+        )
+
+        validate_final_video(
+            muxed_path, final_seconds
+        )
+
+        if os.path.exists(
+            final_path
+        ):
+            os.remove(
+                final_path
+            )
+
+        shutil.copy2(
+            muxed_path,
+            final_path,
+        )
+
+        validate_final_video(
+            final_path, final_seconds
+        )
+
+        print(
+            f"VIDEO GENERATION SUCCESS: {final_path}",
+            flush=True,
+        )
+
+        return final_path
+
+    finally:
+        shutil.rmtree(
+            temp_dir,
+            ignore_errors=True,
+        )
