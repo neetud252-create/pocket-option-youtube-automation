@@ -8,6 +8,21 @@ if ROOT_DIR not in sys.path:
 
 
 def main():
+    replace_date = os.getenv("FORCE_REPLACE_DATE", "").strip()
+    replace_version = os.getenv("FORCE_REPLACE_VERSION", "").strip()
+
+    if replace_date and replace_version:
+        print(
+            f"Running one-time ElevenLabs schedule replacement: {replace_version}",
+            flush=True,
+        )
+        result = subprocess.run(
+            [sys.executable, os.path.join(ROOT_DIR, "scripts", "replace_scheduled.py")],
+            cwd=ROOT_DIR,
+        )
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+
     version = os.getenv("RUN_UNLISTED_TEST_VERSION", "").strip()
 
     if version:
