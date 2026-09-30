@@ -1,7 +1,6 @@
 import json
 import os
 import random
-import shutil
 import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -17,14 +16,17 @@ from app.config import YOUTUBE_DESCRIPTION
 from app.content import generate_content
 from app.video import generate_video
 from app.voice import generate_voice
-from app.youtube import delete_video, schedule_short
+from app.youtube import get_youtube_service, schedule_short
 
 
 DATA_DIR = "/app/data"
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 BUFFER_FILE = os.path.join(DATA_DIR, "buffer_queue.json")
 IST = ZoneInfo("Asia/Kolkata")
-CTA_TEXT = "Go to my channel description and click the Bot Activation button."
+CTA_TEXT = (
+    "Want a smarter chart workflow? Open the channel description and tap "
+    "Bot Activation to see how the process works."
+)
 
 
 def load_buffer():
@@ -89,6 +91,67 @@ def target_slots(target_date):
 
 def slot_matches_target(record, target_iso_values):
     return str(record.get("publish_at", "")) in target_iso_values
+
+
+def unschedule_video(video_id):
+    """Keep the old Short private but remove its scheduled publish time.
+
+    The current OAuth grant includes youtube.upload + youtube.readonly. That
+    grant can update an uploaded video's status, while videos.delete requires
+    a broader scope. Updating the status lets us safely replace tomorrow's
+    scheduled Shorts without asking the user for another OAuth scope.
+    """
+    youtube = get_youtube_service()
+
+    response = (
+        youtube.videos()
+        .list(part="status", id=video_id)
+        .execute()
+    )
+    items = response.get("items", [])
+    if not items:
+        print(f"Old scheduled video already missing: {video_id}", flush=True)
+        return True
+
+    current_status = items[0].get("status", {})
+    new_status = {
+        "privacyStatus": "private",
+        "selfDeclaredMadeForKids": bool(
+            current_status.get("selfDeclaredMadeForKids", False)
+        ),
+    }
+
+    youtube.videos().update(
+        part="status",
+        body={
+            "id": video_id,
+            "status": new_status,
+        },
+    ).execute()
+
+    verify = (
+        youtube.videos()
+        .list(part="status", id=video_id)
+        .execute()
+    )
+    verify_items = verify.get("items", [])
+    if not verify_items:
+        print(f"Old scheduled video disappeared after update: {video_id}", flush=True)
+        return True
+
+    verify_status = verify_items[0].get("status", {})
+    if verify_status.get("publishAt"):
+        raise RuntimeError(
+            f"Old video is still scheduled after status update: {video_id}"
+        )
+
+    if verify_status.get("privacyStatus") != "private":
+        raise RuntimeError(
+            f"Old video is not private after status update: {video_id}"
+        )
+
+    print(f"Old scheduled video unscheduled and kept private: {video_id}", flush=True)
+    return True
 
 
 def main():
@@ -156,9 +219,10 @@ def main():
     existing_ids = list(dict.fromkeys(existing_ids))
 
     for video_id in existing_ids:
-        print(f"Deleting old scheduled video: {video_id}", flush=True)
-        delete_video(video_id)
+        print(f"Unscheduling old scheduled video: {video_id}", flush=True)
+        unschedule_video(video_id)
 
+    data = load_buffer()
     data["slots"] = [
         record
         for record in data.get("slots", [])
