@@ -21,7 +21,10 @@ def main():
             cwd=ROOT_DIR,
         )
         if result.returncode != 0:
-            raise SystemExit(result.returncode)
+            print(
+                "One-time replacement did not complete. Starting the web service anyway so OAuth/recovery remain available.",
+                flush=True,
+            )
 
     version = os.getenv("RUN_UNLISTED_TEST_VERSION", "").strip()
 
