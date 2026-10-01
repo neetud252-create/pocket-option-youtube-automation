@@ -90,7 +90,7 @@ def target_slots(target_date):
 
 
 def slot_matches_target(record, target_iso_values):
-    return str(record.get("publish_at", "")) in target_iso_values
+    return record.get("channel", "default") == "default" and str(record.get("publish_at", "")) in target_iso_values
 
 
 def unschedule_video(video_id):

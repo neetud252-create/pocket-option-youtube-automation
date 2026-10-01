@@ -29,7 +29,7 @@ BASE_URL = (
     + (TELEGRAM_BOT_TOKEN or "")
 )
 
-DATA_DIR = "/app/data"
+from app.channels import DATA_DIR
 
 BUFFER_FILE = os.path.join(
     DATA_DIR,
@@ -563,7 +563,8 @@ def dashboard_text():
             text += (
                 f"\n{index}. "
                 f"{publish_at}\n"
-                f"🎬 {title}\n"
+                f"📺 {slot.get('channel', 'default')}\n"
+            f"🎬 {title}\n"
                 f"🆔 {video_id}\n"
             )
 
@@ -626,7 +627,7 @@ def buffer_text():
     ):
 
         text += (
-            f"{index}. "
+            f"{index}. [{slot.get('channel', 'default')}] "
             f"{slot.get('publish_at', 'Unknown')}\n"
         )
 
@@ -688,6 +689,7 @@ def schedule_text():
 
         text += (
             f"🕐 {publish_at}\n"
+            f"📺 {slot.get('channel', 'default')}\n"
             f"🎬 {title}\n"
             f"🟢 {slot.get('status', 'unknown').upper()}\n\n"
         )
