@@ -951,7 +951,7 @@ def oauth2callback():
         return f"YouTube authorization successful for {channel_profile(channel)['name']}. Token saved."
     except Exception as exc:
         print(f"OAuth callback failed: {type(exc).__name__}", flush=True)
-        return "YouTube authorization failed. Restart authorization.", 500
+        return f"YouTube authorization failed ({type(exc).__name__}).", 500
 
 
 # ============================================================
