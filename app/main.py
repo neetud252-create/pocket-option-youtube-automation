@@ -95,6 +95,11 @@ PUBLIC_BASE_URL = (
     "https://pocket-option-youtube-automation-production.up.railway.app"
 )
 REDIRECT_URI = PUBLIC_BASE_URL + "/oauth2callback"
+# OAuth client IDs are public identifiers.  Keep the approved production
+# client here as a migration guard while Railway's legacy environment value
+# is retired.  The secret remains exclusively in Railway configuration.
+APPROVED_YOUTUBE_CLIENT_ID = "334769775461-9k0of0dvs36ng2plpeflch2ml5po8hk5.apps.googleusercontent.com"
+LEGACY_YOUTUBE_CLIENT_ID = "165786083407-gdfr2i6tpc5f6l5sh7dj515q9gh3l6fm.apps.googleusercontent.com"
 oauth_flows = {}
 OAUTH_LOCK = threading.Lock()
 
@@ -892,6 +897,8 @@ def authorize():
     if channel not in CHANNELS:
         return "Unknown channel", 400
     client_id = os.getenv("YOUTUBE_CLIENT_ID")
+    if not client_id or client_id == LEGACY_YOUTUBE_CLIENT_ID:
+        client_id = APPROVED_YOUTUBE_CLIENT_ID
     client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
     if not client_id or not client_secret:
         return "Missing YouTube OAuth client configuration.", 500

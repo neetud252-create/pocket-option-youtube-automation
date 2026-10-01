@@ -104,6 +104,14 @@ class ChannelTests(unittest.TestCase):
         response = main.app.test_client().get('/oauth2callback?code=test')
         self.assertEqual(response.status_code, 400)
 
+    def test_oauth_uses_approved_client_when_legacy_variable_is_present(self):
+        client = main.app.test_client()
+        with patch.dict(os.environ, {'YOUTUBE_CLIENT_ID': main.LEGACY_YOUTUBE_CLIENT_ID,
+                                     'YOUTUBE_CLIENT_SECRET': 'secret'}):
+            response = client.get('/authorize?channel=goplustrader')
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(main.APPROVED_YOUTUBE_CLIENT_ID, response.location)
+
 
 if __name__ == '__main__':
     unittest.main()
