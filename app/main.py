@@ -896,11 +896,16 @@ def authorize():
     channel = request.args.get("channel", DEFAULT_CHANNEL)
     if channel not in CHANNELS:
         return "Unknown channel", 400
-    client_id = os.getenv("YOUTUBE_CLIENT_ID")
-    if not client_id or client_id == LEGACY_YOUTUBE_CLIENT_ID:
-        client_id = APPROVED_YOUTUBE_CLIENT_ID
-    # Dedicated variable avoids a retired shared Railway secret reference.
-    client_secret = os.getenv("GOPLUS_YOUTUBE_CLIENT_SECRET") or os.getenv("YOUTUBE_CLIENT_SECRET")
+    if channel == "goplustrader":
+        # GoPlusTrader is owned by a different Google account, so use its
+        # separate OAuth client pair and save a separate refresh token.
+        client_id = os.getenv("GOPLUS_YOUTUBE_CLIENT_ID")
+        client_secret = os.getenv("GOPLUS_YOUTUBE_CLIENT_SECRET")
+    else:
+        client_id = os.getenv("YOUTUBE_CLIENT_ID")
+        client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
+        if not client_id or client_id == LEGACY_YOUTUBE_CLIENT_ID:
+            client_id = APPROVED_YOUTUBE_CLIENT_ID
     if not client_id or not client_secret:
         return "Missing YouTube OAuth client configuration.", 500
     flow = Flow.from_client_config({"web": {
