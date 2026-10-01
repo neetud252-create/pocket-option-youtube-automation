@@ -1,4 +1,5 @@
 import os
+from app.channels import DATA_DIR, DEFAULT_CHANNEL, token_file
 import random
 import threading
 import time
@@ -17,8 +18,7 @@ from google.auth.transport.requests import Request
 # SETTINGS
 # ============================================================
 
-DATA_DIR = "/app/data"
-TOKEN_FILE = os.path.join(DATA_DIR, "youtube_token.json")
+TOKEN_FILE = token_file()
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -27,40 +27,41 @@ SCOPES = [
 
 UPLOAD_RETRY_COUNT = 6
 RETRYABLE_HTTP_CODES = {429, 500, 502, 503, 504}
-YOUTUBE_AUTH_LOCK = threading.Lock()
+YOUTUBE_AUTH_LOCK = threading.RLock()
 
 
 # ============================================================
 # CREDENTIALS
 # ============================================================
 
-def save_credentials(credentials):
+def save_credentials(credentials, channel=DEFAULT_CHANNEL):
+    destination = token_file(channel)
     os.makedirs(DATA_DIR, exist_ok=True)
-    temp_file = TOKEN_FILE + ".tmp"
-
-    with open(temp_file, "w", encoding="utf-8") as file:
-        file.write(credentials.to_json())
-
-    os.replace(temp_file, TOKEN_FILE)
-
-
-def get_youtube_service():
+    temp_file = destination + ".tmp"
     with YOUTUBE_AUTH_LOCK:
-        if not os.path.exists(TOKEN_FILE):
+        with open(temp_file, "w", encoding="utf-8") as file:
+            file.write(credentials.to_json())
+        os.replace(temp_file, destination)
+
+
+def get_youtube_service(channel=DEFAULT_CHANNEL):
+    destination = token_file(channel)
+    with YOUTUBE_AUTH_LOCK:
+        if not os.path.exists(destination):
             raise RuntimeError(
                 "YouTube authorization token not found. "
                 "Open /authorize and reconnect YouTube."
             )
 
         credentials = Credentials.from_authorized_user_file(
-            TOKEN_FILE,
+            destination,
             SCOPES,
         )
 
         if credentials.expired and credentials.refresh_token:
             try:
                 credentials.refresh(Request())
-                save_credentials(credentials)
+                save_credentials(credentials, channel)
                 print("YouTube OAuth token refreshed.", flush=True)
             except Exception as exc:
                 raise RuntimeError(
@@ -108,6 +109,7 @@ def _upload_video(
     description,
     privacy_status,
     publish_at=None,
+    channel=DEFAULT_CHANNEL,
 ):
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
@@ -115,7 +117,7 @@ def _upload_video(
     if os.path.getsize(video_path) <= 0:
         raise RuntimeError(f"Video is empty: {video_path}")
 
-    youtube = get_youtube_service()
+    youtube = get_youtube_service(channel)
 
     status = {
         "privacyStatus": privacy_status,
@@ -226,7 +228,7 @@ def _upload_video(
 # PUBLIC UPLOAD FUNCTIONS
 # ============================================================
 
-def upload_short(video_path, title, description):
+def upload_short(video_path, title, description, channel=DEFAULT_CHANNEL):
     print("\n===== MANUAL TEST UPLOAD =====", flush=True)
     print("Mode: UNLISTED", flush=True)
 
@@ -236,11 +238,12 @@ def upload_short(video_path, title, description):
         description=description,
         privacy_status="unlisted",
         publish_at=None,
+        channel=channel,
     )
     return result["video_id"]
 
 
-def schedule_short(video_path, title, description, publish_at):
+def schedule_short(video_path, title, description, publish_at, channel=DEFAULT_CHANNEL):
     if publish_at is None:
         raise ValueError("publish_at is required for scheduled uploads.")
 
@@ -257,6 +260,7 @@ def schedule_short(video_path, title, description, publish_at):
         description=description,
         privacy_status="private",
         publish_at=publish_at,
+        channel=channel,
     )
     return result["video_id"]
 
@@ -265,12 +269,12 @@ def schedule_short(video_path, title, description, publish_at):
 # DELETE / REPLACE SUPPORT
 # ============================================================
 
-def delete_video(video_id):
+def delete_video(video_id, channel=DEFAULT_CHANNEL):
     """Delete one YouTube video. A missing video is treated as already deleted."""
     if not video_id or not isinstance(video_id, str):
         raise ValueError("A valid video_id is required.")
 
-    youtube = get_youtube_service()
+    youtube = get_youtube_service(channel)
 
     try:
         youtube.videos().delete(id=video_id).execute()
@@ -288,14 +292,14 @@ def delete_video(video_id):
 # STATUS
 # ============================================================
 
-def get_video_status(video_id):
+def get_video_status(video_id, channel=DEFAULT_CHANNEL):
     if not video_id:
         raise ValueError("video_id is required.")
 
     if not isinstance(video_id, str):
         raise TypeError("video_id must be a string.")
 
-    youtube = get_youtube_service()
+    youtube = get_youtube_service(channel)
 
     response = (
         youtube.videos()

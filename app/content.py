@@ -12,7 +12,10 @@ import requests
 # CONFIG
 # ============================================================
 
-HISTORY_FILE = "/app/data/content_history.json"
+from app.channels import DATA_DIR
+
+# Shared across BOTH channels to reject reused titles/scripts.
+HISTORY_FILE = os.path.join(DATA_DIR, "content_history.json")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
@@ -205,13 +208,15 @@ def load_history():
             encoding="utf-8",
         ) as file:
             data = json.load(file)
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            raise ValueError("Content history must be a list")
+        return data
     except Exception as exc:
         print(
             f"WARNING: Could not load content history: {exc}",
             flush=True,
         )
-        return []
+        raise RuntimeError("Cannot verify content uniqueness: history is unreadable") from exc
 
 
 def save_history(history):
@@ -932,4 +937,3 @@ def generate_content():
         script,
         history,
     )
-

@@ -4,11 +4,13 @@ import shutil
 import threading
 import time
 import json
+import secrets
+from app.channels import DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file, connected_channels
 
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, redirect, request
+from flask import Flask, jsonify, redirect, request, session
 from google_auth_oauthlib.flow import Flow
 
 from app.config import YOUTUBE_DESCRIPTION
@@ -20,7 +22,8 @@ from app.video import (
     CTA_SOURCE,
     RANDOM_VIDEO_FILES,
 )
-from app.youtube import upload_short, schedule_short, get_video_status
+from app.youtube import upload_short, schedule_short, get_video_status, save_credentials
+from googleapiclient.discovery import build
 from app.telegram import (
     telegram_webhook,
     initialize_telegram,
@@ -34,8 +37,9 @@ from app.telegram import (
 # ============================================================
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
-DATA_DIR = "/app/data"
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 BUFFER_FILE = os.path.join(DATA_DIR, "buffer_queue.json")
 YOUTUBE_TOKEN_FILE = os.path.join(DATA_DIR, "youtube_token.json")
@@ -91,7 +95,8 @@ PUBLIC_BASE_URL = (
     "https://pocket-option-youtube-automation-production.up.railway.app"
 )
 REDIRECT_URI = PUBLIC_BASE_URL + "/oauth2callback"
-oauth_flow = None
+oauth_flows = {}
+OAUTH_LOCK = threading.Lock()
 
 
 # ============================================================
@@ -180,15 +185,15 @@ def cleanup_old_buffer_slots(data):
     return data
 
 
-def find_slot(data, publish_at):
+def find_slot(data, publish_at, channel=DEFAULT_CHANNEL):
     target = publish_at.isoformat()
     for slot in data.get("slots", []):
-        if slot.get("publish_at") == target:
+        if slot.get("publish_at") == target and slot.get("channel", DEFAULT_CHANNEL) == channel:
             return slot
     return None
 
 
-def get_slots_for_date(target_date):
+def get_slots_for_date(target_date, channel=DEFAULT_CHANNEL):
     return [
         datetime(
             target_date.year,
@@ -198,62 +203,29 @@ def get_slots_for_date(target_date):
             minute,
             tzinfo=IST,
         )
-        for hour, minute in BUFFER_TIMES
+        for hour, minute in channel_profile(channel)["times"]
     ]
 
 
-def get_tomorrow_slots():
-    return get_slots_for_date(now_ist().date() + timedelta(days=1))
+def get_tomorrow_slots(channel=DEFAULT_CHANNEL):
+    return get_slots_for_date(now_ist().date() + timedelta(days=1), channel)
 
 
-def get_required_scheduler_slots(current_time=None):
-    """
-    Return only the publish slots that should exist right now.
-
-    Normal run:
-      22:00-23:59 -> tomorrow 10:00 and 18:00.
-
-    Recovery:
-      00:00-09:59 -> today 10:00 and 18:00.
-      10:00-17:59 -> today 18:00.
-      18:00-21:59 -> nothing left today; wait for 22:00.
-    """
-    current_time = current_time or now_ist()
-    today = current_time.date()
-
-    if current_time.hour >= CREATION_HOUR_IST:
-        candidates = get_slots_for_date(today + timedelta(days=1))
-    elif current_time.hour < 10:
-        candidates = get_slots_for_date(today)
-    elif current_time.hour < 18:
-        candidates = [
-            datetime(
-                today.year,
-                today.month,
-                today.day,
-                18,
-                0,
-                tzinfo=IST,
-            )
-        ]
-    else:
-        candidates = []
-
-    minimum_publish_time = current_time + timedelta(
-        minutes=MIN_SCHEDULE_LEAD_MINUTES
-    )
-
-    return [
-        slot for slot in candidates
-        if slot > minimum_publish_time
-    ]
+def get_required_scheduler_slots(current_time=None, channel=DEFAULT_CHANNEL):
+    """At 22:00 prepare tomorrow; recovery only fills future slots today."""
+    current_time = (current_time or now_ist()).astimezone(IST)
+    target_date = current_time.date()
+    if (current_time.hour, current_time.minute) >= (CREATION_HOUR_IST, CREATION_MINUTE_IST):
+        target_date += timedelta(days=1)
+    minimum = current_time + timedelta(minutes=MIN_SCHEDULE_LEAD_MINUTES)
+    return [slot for slot in get_slots_for_date(target_date, channel) if slot > minimum]
 
 
-def missing_slots(slots, data=None):
+def missing_slots(slots, data=None, channel=DEFAULT_CHANNEL):
     data = data or load_buffer()
     return [
         slot for slot in slots
-        if find_slot(data, slot) is None
+        if find_slot(data, slot, channel) is None
     ]
 
 
@@ -261,7 +233,7 @@ def missing_slots(slots, data=None):
 # PREFLIGHT
 # ============================================================
 
-def preflight_status():
+def preflight_status(channel=DEFAULT_CHANNEL):
     available_clips = [
         filename
         for filename in RANDOM_VIDEO_FILES
@@ -269,7 +241,7 @@ def preflight_status():
     ]
 
     return {
-        "youtube_token": os.path.exists(YOUTUBE_TOKEN_FILE),
+        "youtube_token": os.path.exists(token_file(channel)),
         "cta_video": os.path.exists(CTA_SOURCE),
         "normal_clips_found": len(available_clips),
         "normal_clips_required": 4,
@@ -282,8 +254,8 @@ def preflight_status():
     }
 
 
-def ensure_preflight_ready():
-    status = preflight_status()
+def ensure_preflight_ready(channel=DEFAULT_CHANNEL):
+    status = preflight_status(channel)
     critical_failures = []
 
     if not status["youtube_token"]:
@@ -318,7 +290,7 @@ def ensure_preflight_ready():
 # CREATE + SCHEDULE SHORT
 # ============================================================
 
-def create_and_schedule_short(publish_at, reason="BUFFER"):
+def create_and_schedule_short(publish_at, reason="BUFFER", channel=DEFAULT_CHANNEL):
     if not automation_is_enabled():
         print("Automation is PAUSED. Skipping video creation.", flush=True)
         return None
@@ -331,7 +303,7 @@ def create_and_schedule_short(publish_at, reason="BUFFER"):
             f"Publish time is too close or already passed: {publish_at.isoformat()}"
         )
 
-    ensure_preflight_ready()
+    ensure_preflight_ready(channel)
 
     print(
         f"[{reason}] Creating Short for {publish_at.isoformat()}",
@@ -347,7 +319,7 @@ def create_and_schedule_short(publish_at, reason="BUFFER"):
     short_amount = random.randint(1000, 2000)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-    unique_name = f"{publish_at.strftime('%Y%m%d_%H%M')}_{timestamp}"
+    unique_name = f"{channel}_{publish_at.strftime('%Y%m%d_%H%M')}_{timestamp}"
 
     voice_path = os.path.join(
         OUTPUT_DIR,
@@ -370,14 +342,19 @@ def create_and_schedule_short(publish_at, reason="BUFFER"):
             output_filename=video_filename,
         )
 
+        if publish_at <= now_ist() + timedelta(minutes=MIN_SCHEDULE_LEAD_MINUTES):
+            raise RuntimeError("Rendering finished too late for this publish slot")
+
         video_id = schedule_short(
             video_path=video_path,
             title=title,
             description=YOUTUBE_DESCRIPTION,
             publish_at=publish_at,
+            channel=channel,
         )
 
         record = {
+            "channel": channel,
             "title": title,
             "script": script,
             "video_id": video_id,
@@ -406,7 +383,8 @@ def create_and_schedule_short(publish_at, reason="BUFFER"):
 # BUFFER FILL
 # ============================================================
 
-def fill_slots(target_slots, reason="BUFFER"):
+def fill_slots(target_slots, reason="BUFFER", channel=DEFAULT_CHANNEL):
+    channel_profile(channel)
     if not target_slots:
         return {"created": 0, "existing": 0, "failed": 0}
 
@@ -444,7 +422,7 @@ def fill_slots(target_slots, reason="BUFFER"):
 
             with BUFFER_LOCK:
                 data = cleanup_old_buffer_slots(load_buffer())
-                existing = find_slot(data, publish_at)
+                existing = find_slot(data, publish_at, channel)
 
             if existing:
                 existing_count += 1
@@ -458,13 +436,14 @@ def fill_slots(target_slots, reason="BUFFER"):
                 record = create_and_schedule_short(
                     publish_at,
                     reason=reason,
+                    channel=channel,
                 )
 
                 if record:
                     with BUFFER_LOCK:
                         data = cleanup_old_buffer_slots(load_buffer())
 
-                        if not find_slot(data, publish_at):
+                        if not find_slot(data, publish_at, channel):
                             data["slots"].append(record)
                             save_buffer(data)
 
@@ -494,11 +473,11 @@ def fill_slots(target_slots, reason="BUFFER"):
         JOB_LOCK.release()
 
 
-def run_buffer_background(target_slots, reason="BUFFER"):
+def run_buffer_background(target_slots, reason="BUFFER", channel=DEFAULT_CHANNEL):
     def worker():
         try:
             print(f"{reason}: starting", flush=True)
-            fill_slots(target_slots, reason=reason)
+            fill_slots(target_slots, reason=reason, channel=channel)
             print(f"{reason}: finished", flush=True)
         except Exception as exc:
             print(f"{reason} ERROR: {repr(exc)}", flush=True)
@@ -607,7 +586,7 @@ def update_buffer_video_statuses():
             continue
 
         try:
-            status = get_video_status(video_id)
+            status = get_video_status(video_id, channel=slot.get("channel", DEFAULT_CHANNEL))
             if not status:
                 continue
 
@@ -645,7 +624,14 @@ def update_buffer_video_statuses():
 
     if changed:
         with BUFFER_LOCK:
-            save_buffer(data)
+            # Merge status updates into the latest queue; do not drop new uploads.
+            latest = load_buffer()
+            updates = {(s.get("channel", DEFAULT_CHANNEL), s.get("video_id")): s for s in data["slots"]}
+            for slot in latest["slots"]:
+                update = updates.get((slot.get("channel", DEFAULT_CHANNEL), slot.get("video_id")))
+                if update:
+                    slot.update(update)
+            save_buffer(latest)
 
 
 def youtube_monitor_loop():
@@ -671,7 +657,7 @@ def scheduler_loop():
     print("10 PM buffer scheduler started.", flush=True)
     print(
         "Automatic creation time: 10:00 PM IST | "
-        "Publish times: 10:00 AM and 6:00 PM IST",
+        "Original: 10 AM / 6 PM; @goplustrader: midnight / 6 PM IST",
         flush=True,
     )
     print(
@@ -687,38 +673,19 @@ def scheduler_loop():
                 time.sleep(SCHEDULER_CHECK_SECONDS)
                 continue
 
-            target_slots = get_required_scheduler_slots(current_time)
-            missing = missing_slots(target_slots)
-
-            if missing:
-                since_last_failure = (
-                    time.monotonic() - _last_failed_fill_monotonic
-                )
-
-                if (
-                    _last_failed_fill_monotonic == 0.0
-                    or since_last_failure >= FAILED_RETRY_COOLDOWN_SECONDS
-                ):
-                    print(
-                        "Scheduler found missing required slots: "
-                        + ", ".join(slot.isoformat() for slot in missing),
-                        flush=True,
-                    )
-
-                    result = fill_slots(
-                        missing,
-                        reason="AUTO BUFFER",
-                    )
-
-                    if result.get("failed", 0) > 0:
-                        _last_failed_fill_monotonic = time.monotonic()
-                        print(
-                            "Automatic fill had an error. "
-                            "Retrying after 5 minutes.",
-                            flush=True,
-                        )
-                    else:
-                        _last_failed_fill_monotonic = 0.0
+            if _last_failed_fill_monotonic and time.monotonic() - _last_failed_fill_monotonic < FAILED_RETRY_COOLDOWN_SECONDS:
+                time.sleep(SCHEDULER_CHECK_SECONDS)
+                continue
+            pending = []
+            for channel in connected_channels():
+                required = get_required_scheduler_slots(current_time, channel)
+                pending.extend((slot, channel) for slot in missing_slots(required, channel=channel))
+            failed = False
+            # Midnight has the shortest lead time, so prepare it first.
+            for publish_at, channel in sorted(pending):
+                result = fill_slots([publish_at], reason=f"AUTO BUFFER {channel}", channel=channel)
+                failed = failed or result.get("failed", 0) > 0
+            _last_failed_fill_monotonic = time.monotonic() if failed else 0.0
 
         except Exception as exc:
             _last_failed_fill_monotonic = time.monotonic()
@@ -739,8 +706,8 @@ def heartbeat_loop():
         try:
             state = load_automation_state()
             status = "LIVE" if state.get("enabled", True) else "PAUSED"
-            required = get_required_scheduler_slots(now_ist())
-            missing = missing_slots(required)
+            missing = [slot for channel in connected_channels()
+                       for slot in missing_slots(get_required_scheduler_slots(now_ist(), channel), channel=channel)]
             print(
                 f"HEARTBEAT | {iso_now()} | AUTOMATION={status} | "
                 f"missing_required_slots={len(missing)}",
@@ -782,6 +749,12 @@ def home():
         ),
         "creation_time": "22:00 IST",
         "publish_times": ["10:00 IST", "18:00 IST"],
+        "channels": {
+            key: {"name": profile["name"], "connected": os.path.exists(token_file(key)),
+                  "missing_required_slots": [s.isoformat() for s in missing_slots(get_required_scheduler_slots(channel=key), channel=key)],
+                  "publish_times": [f"{h:02d}:{m:02d} IST" for h, m in profile["times"]]}
+            for key, profile in CHANNELS.items()
+        },
         "buffer_mode": "1-day advance + outage catch-up",
         "automated_privacy": "private + scheduled publishAt",
         "manual_test_privacy": "unlisted",
@@ -818,6 +791,12 @@ def health():
         ),
         "creation_time": "22:00 IST",
         "publish_times": ["10:00 IST", "18:00 IST"],
+        "channels": {
+            key: {"name": profile["name"], "connected": os.path.exists(token_file(key)),
+                  "missing_required_slots": [s.isoformat() for s in missing_slots(get_required_scheduler_slots(channel=key), channel=key)],
+                  "publish_times": [f"{h:02d}:{m:02d} IST" for h, m in profile["times"]]}
+            for key, profile in CHANNELS.items()
+        },
         "recovery_mode": True,
         "youtube_token": preflight["youtube_token"],
         "gemini_key_present": preflight["gemini_key_present"],
@@ -851,10 +830,14 @@ def fill_buffer_endpoint():
             "message": "Automation is currently paused.",
         })
 
-    slots = get_tomorrow_slots()
+    channel = request.args.get("channel", DEFAULT_CHANNEL)
+    if channel not in CHANNELS:
+        return jsonify({"error": "Unknown channel"}), 400
+    slots = get_tomorrow_slots(channel)
     run_buffer_background(
         slots,
         "MANUAL TOMORROW BUFFER FILL",
+        channel=channel,
     )
 
     return jsonify({
@@ -872,10 +855,14 @@ def fill_required_endpoint():
             "message": "Automation is currently paused.",
         })
 
-    slots = get_required_scheduler_slots(now_ist())
+    channel = request.args.get("channel", DEFAULT_CHANNEL)
+    if channel not in CHANNELS:
+        return jsonify({"error": "Unknown channel"}), 400
+    slots = get_required_scheduler_slots(now_ist(), channel)
     run_buffer_background(
         slots,
         "MANUAL RECOVERY FILL",
+        channel=channel,
     )
 
     return jsonify({
@@ -901,73 +888,62 @@ def run_test_endpoint():
 
 @app.route("/authorize", methods=["GET"])
 def authorize():
-    global oauth_flow
-
+    channel = request.args.get("channel", DEFAULT_CHANNEL)
+    if channel not in CHANNELS:
+        return "Unknown channel", 400
     client_id = os.getenv("YOUTUBE_CLIENT_ID")
     client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
-
     if not client_id or not client_secret:
-        return (
-            "Missing YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_SECRET.",
-            500,
-        )
-
-    client_config = {
-        "web": {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [REDIRECT_URI],
-        }
-    }
-
-    oauth_flow = Flow.from_client_config(
-        client_config,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
-    )
-
-    authorization_url, _state = oauth_flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent",
-    )
-
-    return redirect(authorization_url)
+        return "Missing YouTube OAuth client configuration.", 500
+    flow = Flow.from_client_config({"web": {
+        "client_id": client_id, "client_secret": client_secret,
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "redirect_uris": [REDIRECT_URI],
+    }}, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+    url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent select_account")
+    with OAUTH_LOCK:
+        expired = [key for key, value in oauth_flows.items() if time.monotonic() - value[2] > 600]
+        for key in expired:
+            oauth_flows.pop(key, None)
+        oauth_flows[state] = (flow, channel, time.monotonic())
+    session["oauth_state"] = state
+    return redirect(url)
 
 
 @app.route("/oauth2callback", methods=["GET"])
 def oauth2callback():
-    global oauth_flow
-
-    if oauth_flow is None:
-        return (
-            "OAuth flow expired. Open /authorize again.",
-            400,
-        )
-
+    state = request.args.get("state", "")
+    if not state or not secrets.compare_digest(state, session.get("oauth_state", "")):
+        return "OAuth state mismatch. Restart authorization.", 400
+    session.pop("oauth_state", None)
+    with OAUTH_LOCK:
+        pending = oauth_flows.pop(state, None)
+    if pending is None or time.monotonic() - pending[2] > 600:
+        return "OAuth flow expired. Restart authorization.", 400
+    flow, channel, _ = pending
+    if request.args.get("error"):
+        return "YouTube authorization was not granted.", 400
     try:
-        oauth_flow.fetch_token(
-            authorization_response=request.url
-        )
-        credentials = oauth_flow.credentials
-
-        os.makedirs(DATA_DIR, exist_ok=True)
-        temp_file = YOUTUBE_TOKEN_FILE + ".tmp"
-
-        with open(temp_file, "w", encoding="utf-8") as file:
-            file.write(credentials.to_json())
-
-        os.replace(temp_file, YOUTUBE_TOKEN_FILE)
-        oauth_flow = None
-
-        return "YouTube authorization successful. Token saved."
-
+        flow.fetch_token(authorization_response=REDIRECT_URI + "?" + request.query_string.decode("utf-8"))
+        credentials = flow.credentials
+        youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
+        owned = youtube.channels().list(part="id,snippet", mine=True).execute().get("items", [])
+        if len(owned) != 1:
+            return "Select the Google account and YouTube channel to connect.", 400
+        actual_id = owned[0]["id"]
+        expected_handle = channel_profile(channel)["handle"]
+        if expected_handle:
+            expected = youtube.channels().list(part="id", forHandle=expected_handle).execute().get("items", [])
+            if not expected or actual_id != expected[0]["id"]:
+                return "Wrong channel selected. Sign in to the account owning @goplustrader and try again. No credentials changed.", 400
+        if not credentials.refresh_token:
+            return "No offline authorization received. Restart authorization and grant access.", 400
+        save_credentials(credentials, channel)
+        return f"YouTube authorization successful for {channel_profile(channel)['name']}. Token saved."
     except Exception as exc:
-        print(f"OAuth callback error: {repr(exc)}", flush=True)
-        record_error(exc)
-        return f"OAuth error: {exc}", 500
+        print(f"OAuth callback failed: {type(exc).__name__}", flush=True)
+        return "YouTube authorization failed. Restart authorization.", 500
 
 
 # ============================================================
@@ -1018,7 +994,8 @@ def start_background_threads():
         ).start()
 
 
-start_background_threads()
+if os.getenv("DISABLE_BACKGROUND_THREADS") != "1":
+    start_background_threads()
 
 
 # ============================================================
