@@ -41,3 +41,45 @@ OAuth sessions expire after ten minutes or an application restart.
 Tests: `python -m unittest discover -s tests -v` (application dependencies needed).
 Tests disable background threads and use temporary storage and mocked APIs;
 they do not generate paid audio or upload videos.
+
+## Telegram gift and trading-access flow
+
+The existing Telegram admin bot also supports public onboarding:
+
+1. The user opens the bot and follows the account-registration link.
+2. The user submits a trading-account UID.
+3. The UID is verified by the configured provider API, or sent to the admin for
+   manual approval when no API is configured.
+4. The verified user sees **Claim Free Money Management Sheet**.
+5. After the user confirms receipt of the spreadsheet, **Start Trading** checks
+   the required deposit.
+6. A verified deposit unlocks the configured trading-access link.
+
+User progress and the gift's Telegram file ID are stored in
+`/app/data/telegram_user_access.json` on the existing Railway volume. One UID
+cannot be claimed by multiple Telegram accounts.
+
+Upload or replace the Excel gift by sending the `.xlsx` or `.xls` document to
+the Telegram bot from the configured admin account, with `/setgift` in the file
+caption. Telegram hosts the document and the bot stores its reusable `file_id`;
+the spreadsheet does not need to be committed to GitHub or uploaded to Railway.
+Use `/users` or the **USERS** dashboard button to view onboarding totals.
+
+Configure these Railway variables:
+
+- `ACCOUNT_REGISTRATION_URL`: affiliate registration/deposit URL shown to users.
+- `REQUIRED_DEPOSIT_AMOUNT`: minimum verified deposit amount.
+- `DEPOSIT_CURRENCY`: display currency such as `USD`.
+- `TRADING_ACCESS_URL`: private group, dashboard, or onboarding URL granted after verification.
+- `SUPPORT_USERNAME`: Telegram username without `@` (optional).
+- `UID_VERIFY_URL`: server-side UID verification endpoint (optional).
+- `DEPOSIT_VERIFY_URL`: server-side deposit verification endpoint (optional).
+- `AFFILIATE_API_KEY`: bearer/API key sent only to the verification endpoints (optional).
+
+Verification endpoints receive JSON. UID verification receives `uid` and
+`telegram_user_id`. Deposit verification also receives `required_amount` and
+`currency`. A response can approve with `verified: true`,
+`account_verified: true`, `deposit_verified: true`, or a `status` of
+`verified`, `approved`, or `success`. Deposit responses may return
+`deposit_amount`, `total_deposit`, or `amount`. When an endpoint is omitted,
+the admin receives Approve and Reject buttons inside Telegram.
