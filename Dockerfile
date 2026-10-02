@@ -38,12 +38,6 @@ RUN mkdir -p /app/voices \
 
 COPY . .
 
-# Railway generated a new public service domain after networking was restored.
-# Patch the legacy OAuth base URL inside the image so /authorize and
-# /oauth2callback use the active service domain without a fragile runtime
-# start-command override.
-RUN sed -i 's#https://pocket-option-youtube-automation-production.up.railway.app#https://pocket-option-youtube-automation-production-75d0.up.railway.app#g' /app/app/main.py
-
 # Exactly one Gunicorn worker is intentional: app.main starts one scheduler
 # thread, and multiple workers would create duplicate scheduler instances.
 CMD ["sh", "-c", "gunicorn --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:${PORT:-8080} app.main:app"]
