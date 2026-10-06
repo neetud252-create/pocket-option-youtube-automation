@@ -13,8 +13,9 @@ import requests
 # ============================================================
 
 from app.channels import DATA_DIR
+from app.storage_lock import storage_lock
 
-# Shared across BOTH channels to reject reused titles/scripts.
+# Shared across all channels to reject reused titles/scripts.
 HISTORY_FILE = os.path.join(DATA_DIR, "content_history.json")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -229,7 +230,7 @@ def save_history(history):
         encoding="utf-8",
     ) as file:
         json.dump(
-            history[-MAX_HISTORY:],
+            history,
             file,
             indent=2,
             ensure_ascii=False,
@@ -260,6 +261,15 @@ def content_is_too_similar(
     script,
     history,
 ):
+    normalized_title = normalize_text(title)
+    normalized_script = normalize_text(script)
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        if normalized_title == normalize_text(item.get("title", "")):
+            return True, "exact duplicate title"
+        if normalized_script == normalize_text(item.get("script", "")):
+            return True, "exact duplicate script"
     recent = [
         item
         for item in history[-SIMILARITY_HISTORY_WINDOW:]
@@ -797,6 +807,11 @@ def save_new_content(
 
 
 def generate_content():
+    with storage_lock(HISTORY_FILE):
+        return _generate_content()
+
+
+def _generate_content():
     print(
         "\n==========================================",
         flush=True,
@@ -937,3 +952,4 @@ def generate_content():
         script,
         history,
     )
+

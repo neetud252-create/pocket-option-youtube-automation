@@ -3,7 +3,8 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from app.channels import DATA_DIR, DEFAULT_CHANNEL, token_file
+from app.channels import DATA_DIR, DEFAULT_CHANNEL, token_file, channel_profile
+from app.upload_ledger import UploadLedger
 import random
 import threading
 import time
@@ -40,6 +41,8 @@ THUMBNAIL_DIR = Path(__file__).resolve().parents[1] / "assets" / "thumbnails"
 # ============================================================
 
 def save_credentials(credentials, channel=DEFAULT_CHANNEL):
+    if channel_profile(channel).get("token_env"):
+        raise RuntimeError("Store channel 3 credentials in Railway YOUTUBE_CHANNEL3_TOKEN_JSON.")
     destination = token_file(channel)
     os.makedirs(DATA_DIR, exist_ok=True)
     temp_file = destination + ".tmp"
@@ -52,21 +55,24 @@ def save_credentials(credentials, channel=DEFAULT_CHANNEL):
 def get_youtube_service(channel=DEFAULT_CHANNEL):
     destination = token_file(channel)
     with YOUTUBE_AUTH_LOCK:
-        if not os.path.exists(destination):
+        profile = channel_profile(channel)
+        token_json = os.getenv(profile.get("token_env", "")) if profile.get("token_env") else None
+        if profile.get("token_env") and not (token_json and profile["handle"]):
+            raise RuntimeError("Channel 3 requires YOUTUBE_CHANNEL3_HANDLE and YOUTUBE_CHANNEL3_TOKEN_JSON.")
+        if not token_json and not os.path.exists(destination):
             raise RuntimeError(
                 "YouTube authorization token not found. "
                 "Open /authorize and reconnect YouTube."
             )
 
-        credentials = Credentials.from_authorized_user_file(
-            destination,
-            SCOPES,
-        )
+        credentials = (Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+                       if token_json else Credentials.from_authorized_user_file(destination, SCOPES))
 
         if credentials.expired and credentials.refresh_token:
             try:
                 credentials.refresh(Request())
-                save_credentials(credentials, channel)
+                if not profile.get("token_env"):
+                    save_credentials(credentials, channel)
                 print("YouTube OAuth token refreshed.", flush=True)
             except Exception as exc:
                 raise RuntimeError(
@@ -80,12 +86,18 @@ def get_youtube_service(channel=DEFAULT_CHANNEL):
                 "Open /authorize and reconnect YouTube."
             )
 
-        return build(
+        service = build(
             "youtube",
             "v3",
             credentials=credentials,
             cache_discovery=False,
         )
+        if profile.get("token_env"):
+            owned = service.channels().list(part="id", mine=True).execute().get("items", [])
+            expected = service.channels().list(part="id", forHandle=profile["handle"]).execute().get("items", [])
+            if len(owned) != 1 or not expected or owned[0]["id"] != expected[0]["id"]:
+                raise RuntimeError("Channel 3 token does not belong to YOUTUBE_CHANNEL3_HANDLE.")
+        return service
 
 
 # ============================================================
@@ -183,6 +195,7 @@ def _upload_video(
     privacy_status,
     publish_at=None,
     channel=DEFAULT_CHANNEL,
+    test_id=None,
 ):
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
@@ -240,6 +253,13 @@ def _upload_video(
     response = None
     retry_attempt = 0
 
+    ledger_key = publish_at if publish_at is not None else test_id
+    ledger = UploadLedger() if ledger_key is not None else None
+    if ledger:
+        completed = ledger.begin(channel, ledger_key, video_path, title)
+        if completed:
+            return completed
+
     while response is None:
         try:
             status_response, response = upload_request.next_chunk()
@@ -284,6 +304,9 @@ def _upload_video(
         raise RuntimeError("YouTube upload completed but no video ID was returned.")
 
     video_url = f"https://www.youtube.com/shorts/{video_id}"
+    # Persist the remote ID before thumbnails or any other fallible follow-up.
+    if ledger:
+        ledger.complete(channel, ledger_key, video_id)
     thumbnail_status = apply_short_thumbnail(youtube, video_id, video_path)
 
     print("\n===== YOUTUBE UPLOAD SUCCESS =====", flush=True)
@@ -303,7 +326,7 @@ def _upload_video(
 # PUBLIC UPLOAD FUNCTIONS
 # ============================================================
 
-def upload_short(video_path, title, description, channel=DEFAULT_CHANNEL):
+def upload_short(video_path, title, description, channel=DEFAULT_CHANNEL, test_id=None):
     print("\n===== MANUAL TEST UPLOAD =====", flush=True)
     print("Mode: UNLISTED", flush=True)
 
@@ -314,6 +337,7 @@ def upload_short(video_path, title, description, channel=DEFAULT_CHANNEL):
         privacy_status="unlisted",
         publish_at=None,
         channel=channel,
+        test_id=test_id,
     )
     return result["video_id"]
 
@@ -404,3 +428,4 @@ def get_video_status(video_id, channel=DEFAULT_CHANNEL):
         "rejection_reason": status.get("rejectionReason"),
         "failure_reason": status.get("failureReason"),
     }
+

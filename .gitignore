@@ -4,3 +4,11 @@ __pycache__/
 .pytest_cache/
 edit_multichannel.py
 publish_payload.json
+*.lock
+*token*.json
+*credentials*.json
+.env
+.env.*
+output/
+data/
+

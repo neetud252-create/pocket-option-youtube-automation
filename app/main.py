@@ -5,7 +5,8 @@ import threading
 import time
 import json
 import secrets
-from app.channels import DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file, connected_channels
+import re
+from app.channels import DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file, connected_channels, channel_connected
 
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -14,6 +15,7 @@ from flask import Flask, jsonify, redirect, request, session
 from google_auth_oauthlib.flow import Flow
 
 from app.config import YOUTUBE_DESCRIPTION
+from app.upload_ledger import UploadLedger
 from app.content import generate_content
 from app.voice import generate_voice
 from app.video import (
@@ -21,6 +23,7 @@ from app.video import (
     ASSETS_DIR,
     CTA_SOURCE,
     RANDOM_VIDEO_FILES,
+    available_random_clips,
 )
 from app.youtube import upload_short, schedule_short, get_video_status, save_credentials, get_thumbnail_status
 from googleapiclient.discovery import build
@@ -95,9 +98,7 @@ PUBLIC_BASE_URL = (
     "https://pocket-option-youtube-automation-production.up.railway.app"
 )
 REDIRECT_URI = PUBLIC_BASE_URL + "/oauth2callback"
-# OAuth client IDs are public identifiers.  Keep the approved production
-# client here as a migration guard while Railway's legacy environment value
-# is retired.  The secret remains exclusively in Railway configuration.
+# Public client IDs preserve the existing default-channel migration guard.
 APPROVED_YOUTUBE_CLIENT_ID = "334769775461-9k0of0dvs36ng2plpeflch2ml5po8hk5.apps.googleusercontent.com"
 LEGACY_YOUTUBE_CLIENT_ID = "165786083407-gdfr2i6tpc5f6l5sh7dj515q9gh3l6fm.apps.googleusercontent.com"
 oauth_flows = {}
@@ -143,17 +144,13 @@ def load_buffer():
         with open(BUFFER_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
 
-        if not isinstance(data, dict):
-            return {"slots": []}
-
-        if not isinstance(data.get("slots"), list):
-            data["slots"] = []
+        if not isinstance(data, dict) or not isinstance(data.get("slots"), list):
+            raise ValueError("Invalid buffer structure")
 
         return data
 
     except Exception as exc:
-        print(f"Buffer load error: {exc}", flush=True)
-        return {"slots": []}
+        raise RuntimeError("Buffer is unreadable; restore it before scheduling to avoid duplicates.") from exc
 
 
 def save_buffer(data):
@@ -239,14 +236,10 @@ def missing_slots(slots, data=None, channel=DEFAULT_CHANNEL):
 # ============================================================
 
 def preflight_status(channel=DEFAULT_CHANNEL):
-    available_clips = [
-        filename
-        for filename in RANDOM_VIDEO_FILES
-        if os.path.exists(os.path.join(ASSETS_DIR, filename))
-    ]
+    available_clips = available_random_clips()
 
     return {
-        "youtube_token": os.path.exists(token_file(channel)),
+        "youtube_token": channel_connected(channel),
         "cta_video": os.path.exists(CTA_SOURCE),
         "normal_clips_found": len(available_clips),
         "normal_clips_required": 4,
@@ -309,6 +302,10 @@ def create_and_schedule_short(publish_at, reason="BUFFER", channel=DEFAULT_CHANN
         )
 
     ensure_preflight_ready(channel)
+
+    receipt = UploadLedger().lookup(channel, publish_at)
+    if receipt:
+        return dict(receipt, reason="Recovered durable upload receipt", thumbnail=get_thumbnail_status(receipt["video_id"]))
 
     print(
         f"[{reason}] Creating Short for {publish_at.isoformat()}",
@@ -383,6 +380,8 @@ def create_and_schedule_short(publish_at, reason="BUFFER", channel=DEFAULT_CHANN
         safe_remove(voice_path)
         safe_remove(os.path.splitext(voice_path)[0] + ".json")
         safe_remove(video_path)
+        if video_path:
+            safe_remove(video_path + ".clips.json")
 
 
 # ============================================================
@@ -497,8 +496,13 @@ def run_buffer_background(target_slots, reason="BUFFER", channel=DEFAULT_CHANNEL
 # MANUAL TEST SHORT
 # ============================================================
 
-def create_and_upload_short():
-    ensure_preflight_ready()
+def create_and_upload_short(channel=DEFAULT_CHANNEL, test_id=None):
+    channel_profile(channel)
+    ensure_preflight_ready(channel)
+    if test_id:
+        receipt = UploadLedger().lookup(channel, test_id)
+        if receipt:
+            return receipt
 
     title, script = generate_content()
 
@@ -532,10 +536,15 @@ def create_and_upload_short():
             video_path=video_path,
             title=title,
             description=YOUTUBE_DESCRIPTION,
+            channel=channel,
+            test_id=test_id,
         )
 
         result = {
+            "channel": channel,
+            "test_id": test_id,
             "title": title,
+            "script": script,
             "video_id": video_id,
             "url": f"https://www.youtube.com/watch?v={video_id}",
             "privacy_status": "unlisted",
@@ -554,9 +563,11 @@ def create_and_upload_short():
         safe_remove(voice_path)
         safe_remove(os.path.splitext(voice_path)[0] + ".json")
         safe_remove(video_path)
+        if video_path:
+            safe_remove(video_path + ".clips.json")
 
 
-def run_short_background(reason="MANUAL TEST"):
+def run_short_background(reason="MANUAL TEST", channel=DEFAULT_CHANNEL, test_id=None):
     def worker():
         if not JOB_LOCK.acquire(blocking=False):
             print(f"{reason}: another video job is already running.", flush=True)
@@ -564,7 +575,7 @@ def run_short_background(reason="MANUAL TEST"):
 
         try:
             print(f"{reason}: started", flush=True)
-            create_and_upload_short()
+            create_and_upload_short(channel=channel, test_id=test_id)
             print(f"{reason}: finished", flush=True)
         except Exception as exc:
             print(f"{reason} ERROR: {repr(exc)}", flush=True)
@@ -663,8 +674,8 @@ def scheduler_loop():
 
     print("10 PM buffer scheduler started.", flush=True)
     print(
-        "Automatic creation time: 10:00 PM IST | "
-        "Original: 10 AM / 6 PM; @goplustrader: midnight / 6 PM IST",
+        "Automatic creation time: 10:00 PM IST | " +
+        " | ".join(f"{p['name']}: " + ", ".join(f"{h:02d}:{m:02d} IST" for h, m in p['times']) for p in CHANNELS.values()),
         flush=True,
     )
     print(
@@ -757,7 +768,7 @@ def home():
         "creation_time": "22:00 IST",
         "publish_times": ["10:00 IST", "18:00 IST"],
         "channels": {
-            key: {"name": profile["name"], "connected": os.path.exists(token_file(key)),
+            key: {"name": profile["name"], "connected": channel_connected(key),
                   "missing_required_slots": [s.isoformat() for s in missing_slots(get_required_scheduler_slots(channel=key), channel=key)],
                   "publish_times": [f"{h:02d}:{m:02d} IST" for h, m in profile["times"]]}
             for key, profile in CHANNELS.items()
@@ -799,7 +810,7 @@ def health():
         "creation_time": "22:00 IST",
         "publish_times": ["10:00 IST", "18:00 IST"],
         "channels": {
-            key: {"name": profile["name"], "connected": os.path.exists(token_file(key)),
+            key: {"name": profile["name"], "connected": channel_connected(key),
                   "missing_required_slots": [s.isoformat() for s in missing_slots(get_required_scheduler_slots(channel=key), channel=key)],
                   "publish_times": [f"{h:02d}:{m:02d} IST" for h, m in profile["times"]]}
             for key, profile in CHANNELS.items()
@@ -881,12 +892,42 @@ def fill_required_endpoint():
 
 @app.route("/run-test", methods=["GET"])
 def run_test_endpoint():
-    run_short_background("MANUAL TEST")
+    channel = request.args.get("channel", DEFAULT_CHANNEL)
+    test_id = request.args.get("test_id")
+    if channel not in CHANNELS:
+        return jsonify({"error": "Unknown channel"}), 400
+    if not test_id or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", test_id):
+        return jsonify({"error": "Provide a stable test_id (letters, digits, hyphens or underscores). Reuse it for retries."}), 400
+    try:
+        ensure_preflight_ready(channel)
+        receipt = UploadLedger().lookup(channel, test_id)
+        if receipt:
+            return jsonify(receipt)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    run_short_background("MANUAL TEST", channel=channel, test_id=test_id)
     return jsonify({
         "ok": True,
         "message": "Manual test started.",
         "privacy": "unlisted",
+        "channel": channel,
+        "test_id": test_id,
     })
+
+
+@app.route("/test-status", methods=["GET"])
+def test_status_endpoint():
+    channel = request.args.get("channel", DEFAULT_CHANNEL)
+    test_id = request.args.get("test_id", "")
+    if channel not in CHANNELS or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", test_id):
+        return jsonify({"error": "Invalid channel or test_id"}), 400
+    record = UploadLedger().load().get(UploadLedger.key(channel, test_id))
+    if record and record.get("video_id"):
+        try:
+            record["youtube_status"] = get_video_status(record["video_id"], channel=channel)
+        except Exception as exc:
+            record["status_error"] = str(exc)
+    return jsonify(record or {"status": "not uploaded"})
 
 
 # ============================================================
@@ -898,16 +939,13 @@ def authorize():
     channel = request.args.get("channel", DEFAULT_CHANNEL)
     if channel not in CHANNELS:
         return "Unknown channel", 400
-    if channel == "goplustrader":
-        # GoPlusTrader is owned by a different Google account, so use its
-        # separate OAuth client pair and save a separate refresh token.
-        client_id = os.getenv("GOPLUS_YOUTUBE_CLIENT_ID")
-        client_secret = os.getenv("GOPLUS_YOUTUBE_CLIENT_SECRET")
-    else:
-        client_id = os.getenv("YOUTUBE_CLIENT_ID")
-        client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
-        if not client_id or client_id == LEGACY_YOUTUBE_CLIENT_ID:
-            client_id = APPROVED_YOUTUBE_CLIENT_ID
+    if channel_profile(channel).get("token_env") and not channel_profile(channel)["handle"]:
+        return "Set YOUTUBE_CHANNEL3_HANDLE in Railway before authorizing channel 3.", 400
+    profile = channel_profile(channel)
+    client_id = os.getenv(profile.get("client_id_env", "YOUTUBE_CLIENT_ID"))
+    client_secret = os.getenv(profile.get("client_secret_env", "YOUTUBE_CLIENT_SECRET"))
+    if channel == DEFAULT_CHANNEL and (not client_id or client_id == LEGACY_YOUTUBE_CLIENT_ID):
+        client_id = APPROVED_YOUTUBE_CLIENT_ID
     if not client_id or not client_secret:
         return "Missing YouTube OAuth client configuration.", 500
     flow = Flow.from_client_config({"web": {
@@ -915,7 +953,7 @@ def authorize():
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
         "redirect_uris": [REDIRECT_URI],
-    }}, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+    }}, scopes=[s for s in SCOPES if channel != "channel3" or not s.endswith("youtube.force-ssl")], redirect_uri=REDIRECT_URI)
     url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent select_account")
     with OAUTH_LOCK:
         expired = [key for key, value in oauth_flows.items() if time.monotonic() - value[2] > 600]
@@ -951,14 +989,20 @@ def oauth2callback():
         if expected_handle:
             expected = youtube.channels().list(part="id", forHandle=expected_handle).execute().get("items", [])
             if not expected or actual_id != expected[0]["id"]:
-                return "Wrong channel selected. Sign in to the account owning @goplustrader and try again. No credentials changed.", 400
+                return "Wrong channel selected. Sign in to the account owning the configured handle and try again. No credentials changed.", 400
         if not credentials.refresh_token:
             return "No offline authorization received. Restart authorization and grant access.", 400
+        if channel_profile(channel).get("token_env"):
+            response = jsonify({"railway_variable": "YOUTUBE_CHANNEL3_TOKEN_JSON",
+                                "value": credentials.to_json(),
+                                "instructions": "Copy value into the Railway variable and redeploy. Keep this token private."})
+            response.headers["Cache-Control"] = "no-store"
+            return response
         save_credentials(credentials, channel)
         return f"YouTube authorization successful for {channel_profile(channel)['name']}. Token saved."
     except Exception as exc:
         print(f"OAuth callback failed: {type(exc).__name__}", flush=True)
-        return f"YouTube authorization failed ({type(exc).__name__}).", 500
+        return "YouTube authorization failed. Restart authorization.", 500
 
 
 # ============================================================
@@ -1020,3 +1064,4 @@ if os.getenv("DISABLE_BACKGROUND_THREADS") != "1":
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
+

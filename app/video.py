@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from app.channels import DATA_DIR
+from app.storage_lock import storage_lock
 
 
 # ============================================================
@@ -17,6 +19,7 @@ BACKGROUND_MUSIC = "/app/assets/background_music.mp3"
 BACKGROUND_MUSIC_VOLUME = 0.10
 
 NUMBER_OF_CLIPS = 4
+CLIP_HISTORY_FILE = os.path.join(DATA_DIR, "clip_sequence_history.json")
 CTA_DURATION = 5.0
 MIN_VIDEO_DURATION = 20.0
 MAX_VIDEO_DURATION = 26.0
@@ -309,9 +312,9 @@ def escape_drawtext(value):
 
 def opening_overlay(short_amount):
     amount_text = escape_drawtext(
-        f"I MADE: ${short_amount} EVERY DAY"
+        random.choice(("AI CHART ANALYSIS", "EXPLORE THE CHART", "TRADING WORKFLOW"))
     )
-    link_text = escape_drawtext("LINK IN BIO")
+    link_text = escape_drawtext("TRADING INVOLVES RISK")
     font_file = escape_drawtext(OVERLAY_FONT_FILE)
 
     return (
@@ -350,20 +353,17 @@ def opening_overlay(short_amount):
 # VIDEO BUILD
 # ============================================================
 
+def available_random_clips():
+    # Discover all deployed clips, including 16–25, without inventing filenames.
+    if not os.path.isdir(ASSETS_DIR):
+        return []
+    return [os.path.join(ASSETS_DIR, name) for name in sorted(os.listdir(ASSETS_DIR))
+            if name.lower().endswith(".mp4") and name != os.path.basename(CTA_SOURCE)
+            and os.path.isfile(os.path.join(ASSETS_DIR, name))]
+
+
 def select_random_clips():
-    available = [
-        os.path.join(
-            ASSETS_DIR,
-            filename,
-        )
-        for filename in RANDOM_VIDEO_FILES
-        if os.path.exists(
-            os.path.join(
-                ASSETS_DIR,
-                filename,
-            )
-        )
-    ]
+    available = available_random_clips()
 
     if len(available) < NUMBER_OF_CLIPS:
         raise RuntimeError(
@@ -372,14 +372,34 @@ def select_random_clips():
             f"Expected directory: {ASSETS_DIR}"
         )
 
-    selected = random.sample(
-        available,
-        NUMBER_OF_CLIPS,
-    )
-
-    random.shuffle(
-        selected
-    )
+    with storage_lock(CLIP_HISTORY_FILE):
+        history = []
+        if os.path.exists(CLIP_HISTORY_FILE):
+            with open(CLIP_HISTORY_FILE, encoding="utf-8") as stream:
+                history = json.load(stream)
+            if not isinstance(history, list) or any(not isinstance(s, list) for s in history):
+                raise RuntimeError("Clip sequence history is unreadable; cannot verify uniqueness.")
+        used = {tuple(sequence) for sequence in history}
+        # Seed from any durable receipts written by earlier versions.
+        ledger_path = os.path.join(DATA_DIR, "upload_ledger.json")
+        if os.path.exists(ledger_path):
+            with open(ledger_path, encoding="utf-8") as stream:
+                receipts = json.load(stream)
+            used.update(tuple(r["clips"]) for r in receipts.values() if r.get("clips"))
+        for _ in range(1000):
+            selected = random.sample(available, NUMBER_OF_CLIPS)
+            sequence = [os.path.basename(clip) for clip in selected]
+            if tuple(sequence) not in used:
+                break
+        else:
+            raise RuntimeError("Cannot find an unused clip sequence; add more footage.")
+        history.append(sequence)
+        # Reserve before rendering, including failed jobs, to avoid concurrent reuse.
+        with open(CLIP_HISTORY_FILE + ".tmp", "w", encoding="utf-8") as stream:
+            json.dump(history, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(CLIP_HISTORY_FILE + ".tmp", CLIP_HISTORY_FILE)
 
     print(
         "\nSelected random clips:",
@@ -740,7 +760,7 @@ def generate_video(
             flush=True,
         )
         print(
-            "Overlay: original green earnings headline and yellow LINK IN BIO",
+            "Overlay: chart-analysis hook and trading-risk reminder",
             flush=True,
         )
         print(
@@ -788,6 +808,8 @@ def generate_video(
             flush=True,
         )
 
+        with open(final_path + ".clips.json", "w", encoding="utf-8") as stream:
+            json.dump([os.path.basename(clip) for clip in selected_clips], stream)
         return final_path
 
     finally:
@@ -795,3 +817,4 @@ def generate_video(
             temp_dir,
             ignore_errors=True,
         )
+

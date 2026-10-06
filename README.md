@@ -91,3 +91,32 @@ Verification endpoints receive JSON. UID verification receives `uid` and
 `verified`, `approved`, or `success`. Deposit responses may return
 `deposit_amount`, `total_deposit`, or `amount`. When an endpoint is omitted,
 the admin receives Approve and Reject buttons inside Telegram.
+# Third YouTube channel
+
+Channel 3 uses the same one-day buffer: at 22:00 Asia/Kolkata, prepare the next
+day's 01:00 and 06:00 Shorts. Recovery fills only future slots. Two configured
+publication slots per day remain independent from an explicitly requested
+unlisted test upload.
+
+Set Railway `YOUTUBE_CHANNEL3_HANDLE=traderFx-x9d`,
+`YOUTUBE_CHANNEL3_CLIENT_ID`, `YOUTUBE_CHANNEL3_CLIENT_SECRET` and
+`YOUTUBE_CHANNEL3_TOKEN_JSON`. The third channel has its own Google OAuth
+client and offline token. Authorize through `/authorize?channel=channel3`;
+register the production `/oauth2callback` URL in Google Cloud. Store the JSON
+returned by the callback in Railway; credentials never belong in Git.
+
+All channels share script history and persistent clip-sequence reservations.
+Exact script/title repeats are checked against the complete retained history;
+similarity checks cover the latest 180 entries. Each render randomly selects
+four different clips from all deployed MP4 footage, excluding the fixed CTA.
+The ordered sequence is reserved on the persistent volume before rendering
+and cannot be reused by another channel or after a restart. The common
+`YOUTUBE_DESCRIPTION` remains identical across channels. Existing uploads
+without recorded clip sequences cannot be reconstructed retrospectively.
+
+For one unlisted test, use `/run-test?channel=channel3&test_id=YOUR_STABLE_ID`.
+Reuse that ID for retries, then read `/test-status` with the same parameters.
+Durable receipts save the remote video ID before thumbnail work. Uncertain
+upload outcomes stop automatic retries and require Studio reconciliation.
+Keep the persistent volume and single-worker deployment.
+
