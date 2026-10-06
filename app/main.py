@@ -6,12 +6,13 @@ import time
 import json
 import secrets
 import re
+from html import escape
 from app.channels import DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file, connected_channels, channel_connected
 
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, redirect, request, session
+from flask import Flask, Response, jsonify, redirect, request, session
 from google_auth_oauthlib.flow import Flow
 
 from app.config import YOUTUBE_DESCRIPTION
@@ -993,10 +994,19 @@ def oauth2callback():
         if not credentials.refresh_token:
             return "No offline authorization received. Restart authorization and grant access.", 400
         if channel_profile(channel).get("token_env"):
-            response = jsonify({"railway_variable": "YOUTUBE_CHANNEL3_TOKEN_JSON",
-                                "value": credentials.to_json(),
-                                "instructions": "Copy value into the Railway variable and redeploy. Keep this token private."})
+            # Show an ordinary page, rather than a JSON document that Chrome
+            # can block during the cross-site OAuth redirect as a download.
+            response = Response(
+                "<!doctype html><html><head><title>Channel 3 connected</title></head><body>"
+                "<h1>Channel 3 authorization successful</h1>"
+                "<p>Store this private token in Railway YOUTUBE_CHANNEL3_TOKEN_JSON, then redeploy.</p>"
+                '<textarea readonly aria-label="Railway channel 3 token" rows="14" cols="90">'
+                + escape(credentials.to_json()) + "</textarea></body></html>",
+                content_type="text/html; charset=utf-8",
+            )
             response.headers["Cache-Control"] = "no-store"
+            response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+            response.headers["Referrer-Policy"] = "no-referrer"
             return response
         save_credentials(credentials, channel)
         return f"YouTube authorization successful for {channel_profile(channel)['name']}. Token saved."

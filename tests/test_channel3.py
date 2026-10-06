@@ -83,7 +83,9 @@ class ThirdChannelTests(unittest.TestCase):
         with patch.dict(CHANNELS['channel3'], handle='traderFx-x9d'), patch.object(main, 'build', return_value=service), patch.object(main, 'save_credentials') as save:
             response = client.get('/oauth2callback?state=third&code=test', base_url='https://localhost')
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json['railway_variable'], 'YOUTUBE_CHANNEL3_TOKEN_JSON')
+            self.assertIn(b'YOUTUBE_CHANNEL3_TOKEN_JSON', response.data)
+            self.assertIn(b'Railway channel 3 token', response.data)
+            self.assertEqual(response.mimetype, 'text/html')
             self.assertEqual(response.headers['Cache-Control'], 'no-store')
             save.assert_not_called()
 
