@@ -11,11 +11,11 @@ from googleapiclient.errors import HttpError
 
 
 class ThumbnailTests(unittest.TestCase):
-    def test_extracts_at_one_second_and_checks_output(self):
+    def test_extracts_at_two_seconds_and_checks_output(self):
         with tempfile.TemporaryDirectory() as directory:
             output = str(Path(directory) / 'frame.jpg')
             def render(command, **kwargs):
-                self.assertEqual(command[command.index('-ss') + 1], '1.000')
+                self.assertEqual(command[command.index('-ss') + 1], '2.000')
                 self.assertLess(command.index('-i'), command.index('-ss'))
                 Path(output).write_bytes(b'jpeg')
             with patch.object(youtube.subprocess, 'run', side_effect=render):
@@ -45,7 +45,7 @@ class ThumbnailTests(unittest.TestCase):
                 image_paths.append(path)
             with patch.object(youtube, 'DATA_DIR', directory), patch.object(youtube, 'extract_thumbnail', side_effect=render), patch.object(youtube, 'set_short_thumbnail') as upload:
                 status = youtube.apply_short_thumbnail(Mock(), 'video', 'final.mp4')
-                self.assertEqual(status, {'timestamp_seconds': 1.0, 'status': 'set'})
+                self.assertEqual(status, {'timestamp_seconds': 2.0, 'status': 'set'})
                 self.assertEqual(youtube.get_thumbnail_status('video'), status)
                 self.assertEqual(upload.call_args.args[1], 'video')
             self.assertFalse(Path(image_paths[0]).exists())

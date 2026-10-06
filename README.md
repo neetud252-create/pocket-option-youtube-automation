@@ -1,6 +1,6 @@
 # Pocket Option YouTube Automation
 
-New uploads on both channels extract the frame at 00:01 from the final video
+New uploads on both channels extract the frame at 00:02 from the final video
 and submit it as a JPEG thumbnail. Temporary images are removed after upload.
 Transient thumbnail errors are retried without reuploading the video. Results
 are stored in `data/thumbnail_<video_id>.json` and scheduled buffer records.

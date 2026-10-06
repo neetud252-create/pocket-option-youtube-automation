@@ -107,15 +107,15 @@ def is_retryable_http_error(exc):
 # ============================================================
 
 def extract_thumbnail(video_path, output_path):
-    """Extract the first decoded frame at or after 00:01 from the final render."""
+    """Extract the first decoded frame at or after 00:02 from the final render."""
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-         "-i", video_path, "-ss", "1.000", "-map", "0:v:0",
+         "-i", video_path, "-ss", "2.000", "-map", "0:v:0",
          "-frames:v", "1", "-q:v", "2", output_path],
         check=True, capture_output=True, timeout=120,
     )
     if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
-        raise RuntimeError("No thumbnail frame available at 00:01.")
+        raise RuntimeError("No thumbnail frame available at 00:02.")
 
 
 def set_short_thumbnail(youtube, video_id, thumbnail_path):
@@ -144,17 +144,17 @@ def get_thumbnail_status(video_id):
 
 
 def apply_short_thumbnail(youtube, video_id, video_path):
-    status = {"timestamp_seconds": 1.0, "status": "failed"}
+    status = {"timestamp_seconds": 2.0, "status": "failed"}
     try:
         with tempfile.TemporaryDirectory(prefix="short-thumbnail-") as directory:
             path = os.path.join(directory, "thumbnail.jpg")
             extract_thumbnail(video_path, path)
             set_short_thumbnail(youtube, video_id, path)
         status["status"] = "set"
-        print(f"Thumbnail set from 00:01: {video_id}", flush=True)
+        print(f"Thumbnail set from 00:02: {video_id}", flush=True)
     except Exception as exc:
         status["error"] = str(exc)
-        print(f"WARNING: Thumbnail at 00:01 failed for {video_id}: {exc}", flush=True)
+        print(f"WARNING: Thumbnail at 00:02 failed for {video_id}: {exc}", flush=True)
     # Keep the uploaded ID even if thumbnails are unsupported; reuploading the
     # entire video would create duplicate scheduled Shorts.
     try:
