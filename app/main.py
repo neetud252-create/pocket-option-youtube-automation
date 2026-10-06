@@ -22,7 +22,7 @@ from app.video import (
     CTA_SOURCE,
     RANDOM_VIDEO_FILES,
 )
-from app.youtube import upload_short, schedule_short, get_video_status, save_credentials
+from app.youtube import upload_short, schedule_short, get_video_status, save_credentials, get_thumbnail_status
 from googleapiclient.discovery import build
 from app.telegram import (
     telegram_webhook,
@@ -370,6 +370,7 @@ def create_and_schedule_short(publish_at, reason="BUFFER", channel=DEFAULT_CHANN
             "created_at": iso_now(),
             "reason": reason,
             "demo_amount": short_amount,
+            "thumbnail": get_thumbnail_status(video_id),
         }
 
         print(
@@ -538,6 +539,7 @@ def create_and_upload_short():
             "video_id": video_id,
             "url": f"https://www.youtube.com/watch?v={video_id}",
             "privacy_status": "unlisted",
+            "thumbnail": get_thumbnail_status(video_id),
             "created_at": iso_now(),
         }
 

@@ -1,5 +1,13 @@
 # Pocket Option YouTube Automation
 
+New uploads on both channels extract the frame at 00:01 from the final video
+and submit it as a JPEG thumbnail. Temporary images are removed after upload.
+Transient thumbnail errors are retried without reuploading the video. Results
+are stored in `data/thumbnail_<video_id>.json` and scheduled buffer records.
+If YouTube rejects a custom Shorts thumbnail, the video stays scheduled with
+YouTube's default thumbnail, and the failure is logged. Existing uploads are
+unchanged.
+
 Automated YouTube Shorts generator and uploader for the Pocket Option AI Bot.
 
 Planned workflow:

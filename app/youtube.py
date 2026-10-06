@@ -1,4 +1,7 @@
 import os
+import json
+import subprocess
+import tempfile
 from app.channels import DATA_DIR, DEFAULT_CHANNEL, token_file
 import random
 import threading
@@ -102,6 +105,67 @@ def is_retryable_http_error(exc):
 # ============================================================
 # INTERNAL UPLOAD
 # ============================================================
+
+def extract_thumbnail(video_path, output_path):
+    """Extract the first decoded frame at or after 00:01 from the final render."""
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+         "-i", video_path, "-ss", "1.000", "-map", "0:v:0",
+         "-frames:v", "1", "-q:v", "2", output_path],
+        check=True, capture_output=True, timeout=120,
+    )
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+        raise RuntimeError("No thumbnail frame available at 00:01.")
+
+
+def set_short_thumbnail(youtube, video_id, thumbnail_path):
+    for attempt in range(UPLOAD_RETRY_COUNT + 1):
+        try:
+            return youtube.thumbnails().set(
+                videoId=video_id,
+                media_body=MediaFileUpload(thumbnail_path, mimetype="image/jpeg"),
+            ).execute()
+        except HttpError as exc:
+            # Newly uploaded videos can briefly be unavailable to this endpoint.
+            if (not is_retryable_http_error(exc) and exc.resp.status != 404) or attempt == UPLOAD_RETRY_COUNT:
+                raise
+        except (httplib2.HttpLib2Error, OSError, TimeoutError):
+            if attempt == UPLOAD_RETRY_COUNT:
+                raise
+        time.sleep(retry_delay(attempt + 1))
+
+
+def get_thumbnail_status(video_id):
+    path = os.path.join(DATA_DIR, f"thumbnail_{video_id}.json")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as file:
+        return json.load(file)
+
+
+def apply_short_thumbnail(youtube, video_id, video_path):
+    status = {"timestamp_seconds": 1.0, "status": "failed"}
+    try:
+        with tempfile.TemporaryDirectory(prefix="short-thumbnail-") as directory:
+            path = os.path.join(directory, "thumbnail.jpg")
+            extract_thumbnail(video_path, path)
+            set_short_thumbnail(youtube, video_id, path)
+        status["status"] = "set"
+        print(f"Thumbnail set from 00:01: {video_id}", flush=True)
+    except Exception as exc:
+        status["error"] = str(exc)
+        print(f"WARNING: Thumbnail at 00:01 failed for {video_id}: {exc}", flush=True)
+    # Keep the uploaded ID even if thumbnails are unsupported; reuploading the
+    # entire video would create duplicate scheduled Shorts.
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        path = os.path.join(DATA_DIR, f"thumbnail_{video_id}.json")
+        with open(path + ".tmp", "w", encoding="utf-8") as file:
+            json.dump(status, file)
+        os.replace(path + ".tmp", path)
+    except OSError as exc:
+        print(f"WARNING: Could not save thumbnail status for {video_id}: {exc}", flush=True)
+    return status
 
 def _upload_video(
     video_path,
@@ -211,6 +275,7 @@ def _upload_video(
         raise RuntimeError("YouTube upload completed but no video ID was returned.")
 
     video_url = f"https://www.youtube.com/shorts/{video_id}"
+    thumbnail_status = apply_short_thumbnail(youtube, video_id, video_path)
 
     print("\n===== YOUTUBE UPLOAD SUCCESS =====", flush=True)
     print(f"Video ID: {video_id}", flush=True)
@@ -220,6 +285,7 @@ def _upload_video(
         "video_id": video_id,
         "url": video_url,
         "privacy_status": privacy_status,
+        "thumbnail": thumbnail_status,
         "publish_at": publish_at.isoformat() if publish_at is not None else None,
     }
 
