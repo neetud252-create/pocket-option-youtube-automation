@@ -65,7 +65,10 @@ def get_youtube_service(channel=DEFAULT_CHANNEL):
                 "Open /authorize and reconnect YouTube."
             )
 
-        credentials = (Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+        # The production entry point adds force-ssl for legacy replacement jobs.
+        # Channel 3 only grants upload/read-only; refresh must use the same grant.
+        scopes = [s for s in SCOPES if channel != "channel3" or not s.endswith("youtube.force-ssl")]
+        credentials = (Credentials.from_authorized_user_info(json.loads(token_json), scopes)
                        if token_json else Credentials.from_authorized_user_file(destination, SCOPES))
 
         if credentials.expired and credentials.refresh_token:

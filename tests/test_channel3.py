@@ -16,6 +16,17 @@ from app.upload_ledger import UploadLedger
 
 
 class ThirdChannelTests(unittest.TestCase):
+    def test_channel3_refresh_uses_only_authorized_scopes(self):
+        credentials = Mock(expired=True, refresh_token='mock', valid=True)
+        service = Mock()
+        service.channels.return_value.list.return_value.execute.return_value = {'items': [{'id': 'third-id'}]}
+        force_ssl = 'https://www.googleapis.com/auth/youtube.force-ssl'
+        with patch.dict(CHANNELS['channel3'], handle='traderFx-x9d'), patch.dict(os.environ, YOUTUBE_CHANNEL3_TOKEN_JSON='{}'), patch.object(youtube, 'SCOPES', youtube.SCOPES + [force_ssl]), patch.object(youtube.Credentials, 'from_authorized_user_info', return_value=credentials) as factory, patch.object(youtube, 'build', return_value=service), patch.object(youtube, 'save_credentials') as save:
+            youtube.get_youtube_service('channel3')
+            self.assertNotIn(force_ssl, factory.call_args.args[1])
+            credentials.refresh.assert_called_once()
+            save.assert_not_called()
+
     def test_old_exact_script_is_rejected_beyond_similarity_window(self):
         history = [{'title': 'original', 'script': 'first script'}]
         history += [{'title': f'title {i}', 'script': f'script {i}'} for i in range(200)]
