@@ -2,6 +2,7 @@ import os
 import json
 import subprocess
 import tempfile
+from pathlib import Path
 from app.channels import DATA_DIR, DEFAULT_CHANNEL, token_file
 import random
 import threading
@@ -31,6 +32,7 @@ SCOPES = [
 UPLOAD_RETRY_COUNT = 6
 RETRYABLE_HTTP_CODES = {429, 500, 502, 503, 504}
 YOUTUBE_AUTH_LOCK = threading.RLock()
+THUMBNAIL_DIR = Path(__file__).resolve().parents[1] / "assets" / "thumbnails"
 
 
 # ============================================================
@@ -123,7 +125,7 @@ def set_short_thumbnail(youtube, video_id, thumbnail_path):
         try:
             return youtube.thumbnails().set(
                 videoId=video_id,
-                media_body=MediaFileUpload(thumbnail_path, mimetype="image/jpeg"),
+                media_body=MediaFileUpload(str(thumbnail_path), mimetype="image/png" if str(thumbnail_path).lower().endswith(".png") else "image/jpeg"),
             ).execute()
         except HttpError as exc:
             # Newly uploaded videos can briefly be unavailable to this endpoint.
@@ -146,15 +148,22 @@ def get_thumbnail_status(video_id):
 def apply_short_thumbnail(youtube, video_id, video_path):
     status = {"timestamp_seconds": 2.0, "status": "failed"}
     try:
+        images = sorted(path for path in THUMBNAIL_DIR.glob("*")
+                        if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+                        and path.stat().st_size > 0)
         with tempfile.TemporaryDirectory(prefix="short-thumbnail-") as directory:
-            path = os.path.join(directory, "thumbnail.jpg")
-            extract_thumbnail(video_path, path)
+            if images:
+                path = random.choice(images)
+                status = {"source": "asset", "filename": path.name, "status": "failed"}
+            else:
+                path = os.path.join(directory, "thumbnail.jpg")
+                extract_thumbnail(video_path, path)
             set_short_thumbnail(youtube, video_id, path)
         status["status"] = "set"
-        print(f"Thumbnail set from 00:02: {video_id}", flush=True)
+        print(f"Thumbnail set from {status.get('filename', '00:02')}: {video_id}", flush=True)
     except Exception as exc:
         status["error"] = str(exc)
-        print(f"WARNING: Thumbnail at 00:02 failed for {video_id}: {exc}", flush=True)
+        print(f"WARNING: Thumbnail failed for {video_id}: {exc}", flush=True)
     # Keep the uploaded ID even if thumbnails are unsupported; reuploading the
     # entire video would create duplicate scheduled Shorts.
     try:

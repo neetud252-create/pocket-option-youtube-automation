@@ -43,12 +43,26 @@ class ThumbnailTests(unittest.TestCase):
             def render(video, path):
                 Path(path).write_bytes(b'jpeg')
                 image_paths.append(path)
-            with patch.object(youtube, 'DATA_DIR', directory), patch.object(youtube, 'extract_thumbnail', side_effect=render), patch.object(youtube, 'set_short_thumbnail') as upload:
+            with patch.object(youtube, 'THUMBNAIL_DIR', Path(directory)), patch.object(youtube, 'DATA_DIR', directory), patch.object(youtube, 'extract_thumbnail', side_effect=render), patch.object(youtube, 'set_short_thumbnail') as upload:
                 status = youtube.apply_short_thumbnail(Mock(), 'video', 'final.mp4')
                 self.assertEqual(status, {'timestamp_seconds': 2.0, 'status': 'set'})
                 self.assertEqual(youtube.get_thumbnail_status('video'), status)
                 self.assertEqual(upload.call_args.args[1], 'video')
             self.assertFalse(Path(image_paths[0]).exists())
+
+    def test_asset_selection_ignores_non_images_and_preserves_asset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / '01.png'
+            image.write_bytes(b'png')
+            (Path(directory) / '.gitkeep').write_text('')
+            (Path(directory) / 'empty.jpg').touch()
+            with patch.object(youtube, 'THUMBNAIL_DIR', Path(directory)), patch.object(youtube, 'DATA_DIR', directory), patch.object(youtube, 'extract_thumbnail') as extract, patch.object(youtube, 'set_short_thumbnail') as upload, patch.object(youtube.random, 'choice', return_value=image) as choose:
+                status = youtube.apply_short_thumbnail(Mock(), 'video', 'final.mp4')
+                self.assertEqual(status, {'source': 'asset', 'filename': '01.png', 'status': 'set'})
+                choose.assert_called_once_with([image])
+                extract.assert_not_called()
+                self.assertEqual(upload.call_args.args[2], image)
+                self.assertTrue(image.exists())
 
     def test_retries_only_thumbnail_for_transient_failure(self):
         service = Mock()
