@@ -49,6 +49,16 @@ RANDOM_VIDEO_FILES = [
     "13_trading_signal_screen.mp4",
     "14_market_data_analysis.mp4",
     "15_ai_trade_monitoring.mp4",
+    "16_trade_entry.mp4",
+    "17_ai_signal_alert.mp4",
+    "18_market_scanner.mp4",
+    "19_chart_breakout.mp4",
+    "20_profit_result.mp4",
+    "21_ai_trade_prediction.mp4",
+    "22_signal_confirmation.mp4",
+    "23_live_chart_analysis.mp4",
+    "24_trade_execution.mp4",
+    "25_winning_trade_result.mp4",
 ]
 
 
