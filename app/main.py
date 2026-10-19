@@ -258,7 +258,16 @@ def ensure_preflight_ready(channel=DEFAULT_CHANNEL):
     critical_failures = []
 
     if not status["youtube_token"]:
-        critical_failures.append("YouTube token is missing")
+        critical_failures.append(
+            f"YouTube token is missing for {channel_profile(channel)['name']}"
+        )
+    else:
+        # Validate/refresh OAuth before spending DeepSeek or ElevenLabs credits
+        # on a render that cannot be uploaded.
+        try:
+            get_youtube_service(channel)
+        except Exception as exc:
+            critical_failures.append(str(exc))
 
     if not status["cta_video"]:
         critical_failures.append("activation_cta.mp4 is missing")
