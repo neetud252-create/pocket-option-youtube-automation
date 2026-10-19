@@ -3,7 +3,7 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from app.channels import DATA_DIR, DEFAULT_CHANNEL, token_file, channel_profile
+from app.channels import (\n    DATA_DIR, DEFAULT_CHANNEL, token_file, channel_profile,\n    load_channel_metadata, configured_handle,\n)
 from app.upload_ledger import UploadLedger
 import random
 import threading
@@ -41,8 +41,6 @@ THUMBNAIL_DIR = Path(__file__).resolve().parents[1] / "assets" / "thumbnails"
 # ============================================================
 
 def save_credentials(credentials, channel=DEFAULT_CHANNEL):
-    if channel_profile(channel).get("token_env"):
-        raise RuntimeError("Store channel 3 credentials in Railway YOUTUBE_CHANNEL3_TOKEN_JSON.")
     destination = token_file(channel)
     os.makedirs(DATA_DIR, exist_ok=True)
     temp_file = destination + ".tmp"
@@ -55,38 +53,37 @@ def save_credentials(credentials, channel=DEFAULT_CHANNEL):
 def get_youtube_service(channel=DEFAULT_CHANNEL):
     destination = token_file(channel)
     with YOUTUBE_AUTH_LOCK:
-        profile = channel_profile(channel)
-        token_json = os.getenv(profile.get("token_env", "")) if profile.get("token_env") else None
-        if profile.get("token_env") and not (token_json and profile["handle"]):
-            raise RuntimeError("Channel 3 requires YOUTUBE_CHANNEL3_HANDLE and YOUTUBE_CHANNEL3_TOKEN_JSON.")
-        if not token_json and not os.path.exists(destination):
+        if not os.path.isfile(destination) or os.path.getsize(destination) <= 0:
             raise RuntimeError(
-                "YouTube authorization token not found. "
-                "Open /authorize and reconnect YouTube."
+                f"YouTube authorization token not found for {channel_profile(channel)['name']}. "
+                f"Open /authorize?channel={channel} and reconnect it."
             )
 
-        # The production entry point adds force-ssl for legacy replacement jobs.
-        # Channel 3 only grants upload/read-only; refresh must use the same grant.
-        scopes = [s for s in SCOPES if channel != "channel3" or not s.endswith("youtube.force-ssl")]
-        credentials = (Credentials.from_authorized_user_info(json.loads(token_json), scopes)
-                       if token_json else Credentials.from_authorized_user_file(destination, SCOPES))
+        # Preserve the exact scopes granted to this channel. Even when two
+        # channels share one Gmail, each automation slot keeps its own OAuth
+        # refresh token and channel identity.
+        credentials = Credentials.from_authorized_user_file(destination)
 
         if credentials.expired and credentials.refresh_token:
             try:
                 credentials.refresh(Request())
-                if not profile.get("token_env"):
-                    save_credentials(credentials, channel)
-                print("YouTube OAuth token refreshed.", flush=True)
+                save_credentials(credentials, channel)
+                print(f"YouTube OAuth token refreshed for {channel}.", flush=True)
             except Exception as exc:
+                print(
+                    f"YouTube token refresh failed for {channel}: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
                 raise RuntimeError(
-                    "YouTube token refresh failed. "
-                    "Open /authorize and reconnect YouTube."
+                    f"YouTube token refresh failed for {channel_profile(channel)['name']}. "
+                    f"Open /authorize?channel={channel} and reconnect it."
                 ) from exc
 
         if not credentials.valid:
             raise RuntimeError(
-                "YouTube credentials are invalid. "
-                "Open /authorize and reconnect YouTube."
+                f"YouTube credentials are invalid for {channel_profile(channel)['name']}. "
+                f"Open /authorize?channel={channel} and reconnect it."
             )
 
         service = build(
@@ -95,11 +92,35 @@ def get_youtube_service(channel=DEFAULT_CHANNEL):
             credentials=credentials,
             cache_discovery=False,
         )
-        if profile.get("token_env"):
-            owned = service.channels().list(part="id", mine=True).execute().get("items", [])
-            expected = service.channels().list(part="id", forHandle=profile["handle"]).execute().get("items", [])
-            if len(owned) != 1 or not expected or owned[0]["id"] != expected[0]["id"]:
-                raise RuntimeError("Channel 3 token does not belong to YOUTUBE_CHANNEL3_HANDLE.")
+
+        owned = service.channels().list(
+            part="id,snippet",
+            mine=True,
+        ).execute().get("items", [])
+        if len(owned) != 1:
+            raise RuntimeError(
+                f"Could not resolve exactly one YouTube channel for {channel_profile(channel)['name']}."
+            )
+
+        actual_id = owned[0]["id"]
+        metadata = load_channel_metadata(channel)
+        expected_id = metadata.get("channel_id")
+        if expected_id and actual_id != expected_id:
+            raise RuntimeError(
+                f"Saved token for {channel_profile(channel)['name']} belongs to a different YouTube channel."
+            )
+
+        expected_handle = configured_handle(channel)
+        if expected_handle:
+            expected = service.channels().list(
+                part="id",
+                forHandle=expected_handle,
+            ).execute().get("items", [])
+            if not expected or expected[0]["id"] != actual_id:
+                raise RuntimeError(
+                    f"Saved token for {channel_profile(channel)['name']} does not match @{expected_handle}."
+                )
+
         return service
 
 
