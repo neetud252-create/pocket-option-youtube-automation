@@ -7,7 +7,7 @@ import json
 import secrets
 import re
 from html import escape
-from app.channels import DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file, connected_channels, channel_connected
+from app.channels import (\n    DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file,\n    connected_channels, channel_connected, configured_handle,\n    load_channel_metadata, save_channel_metadata, channel_display_name,\n)
 
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -26,7 +26,7 @@ from app.video import (
     RANDOM_VIDEO_FILES,
     available_random_clips,
 )
-from app.youtube import upload_short, schedule_short, get_video_status, save_credentials, get_thumbnail_status
+from app.youtube import (\n    upload_short, schedule_short, get_video_status, save_credentials,\n    get_thumbnail_status, get_youtube_service,\n)
 from googleapiclient.discovery import build
 from app.telegram import (
     telegram_webhook,
@@ -935,32 +935,108 @@ def test_status_endpoint():
 # YOUTUBE OAUTH
 # ============================================================
 
+@app.route("/channels", methods=["GET"])
+def channels_dashboard():
+    rows = []
+    for key, profile in CHANNELS.items():
+        metadata = load_channel_metadata(key)
+        status = "Not connected"
+        detail = ""
+        if channel_connected(key):
+            try:
+                youtube = get_youtube_service(key)
+                owned = youtube.channels().list(
+                    part="id,snippet",
+                    mine=True,
+                ).execute().get("items", [])
+                if len(owned) == 1:
+                    title = owned[0].get("snippet", {}).get("title") or profile["name"]
+                    channel_id = owned[0].get("id", "")
+                    status = "Connected"
+                    detail = f"{title} — {channel_id}"
+                else:
+                    status = "Reconnect required"
+            except Exception as exc:
+                status = "Reconnect required"
+                detail = str(exc)
+
+        link = f"/authorize?channel={key}"
+        rows.append(
+            "<tr>"
+            f"<td>{escape(profile['name'])}</td>"
+            f"<td>{escape(metadata.get('title') or '-')}</td>"
+            f"<td>{escape(status)}</td>"
+            f"<td>{escape(detail)}</td>"
+            f"<td><a href='{escape(link)}'>Connect / Reconnect</a></td>"
+            "</tr>"
+        )
+
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>YouTube Channel Connections</title>"
+        "<style>body{font-family:Arial,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px}"
+        "table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:12px;text-align:left}"
+        "th{background:#f4f4f4}a{font-weight:700}</style></head><body>"
+        "<h1>YouTube Channel Connections</h1>"
+        "<p>Each slot keeps its own OAuth token, even when two channels use the same Gmail.</p>"
+        "<table><tr><th>Automation slot</th><th>Saved channel</th><th>Status</th><th>Verified identity</th><th>Action</th></tr>"
+        + "".join(rows)
+        + "</table></body></html>"
+    )
+    response = Response(html, content_type="text/html; charset=utf-8")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/authorize", methods=["GET"])
 def authorize():
     channel = request.args.get("channel", DEFAULT_CHANNEL)
     if channel not in CHANNELS:
         return "Unknown channel", 400
-    if channel_profile(channel).get("token_env") and not channel_profile(channel)["handle"]:
-        return "Set YOUTUBE_CHANNEL3_HANDLE in Railway before authorizing channel 3.", 400
+
     profile = channel_profile(channel)
     client_id = os.getenv(profile.get("client_id_env", "YOUTUBE_CLIENT_ID"))
     client_secret = os.getenv(profile.get("client_secret_env", "YOUTUBE_CLIENT_SECRET"))
+
     if channel == DEFAULT_CHANNEL and (not client_id or client_id == LEGACY_YOUTUBE_CLIENT_ID):
         client_id = APPROVED_YOUTUBE_CLIENT_ID
+
+    if not client_id:
+        client_id = os.getenv("YOUTUBE_CLIENT_ID")
+    if not client_secret:
+        client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
+
     if not client_id or not client_secret:
         return "Missing YouTube OAuth client configuration.", 500
-    flow = Flow.from_client_config({"web": {
-        "client_id": client_id, "client_secret": client_secret,
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": [REDIRECT_URI],
-    }}, scopes=[s for s in SCOPES if channel != "channel3" or not s.endswith("youtube.force-ssl")], redirect_uri=REDIRECT_URI)
-    url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent select_account")
+
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [REDIRECT_URI],
+            }
+        },
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI,
+    )
+    url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent select_account",
+    )
+
     with OAUTH_LOCK:
-        expired = [key for key, value in oauth_flows.items() if time.monotonic() - value[2] > 600]
+        expired = [
+            key for key, value in oauth_flows.items()
+            if time.monotonic() - value[2] > 600
+        ]
         for key in expired:
             oauth_flows.pop(key, None)
         oauth_flows[state] = (flow, channel, time.monotonic())
+
     session["oauth_state"] = state
     return redirect(url)
 
@@ -968,50 +1044,104 @@ def authorize():
 @app.route("/oauth2callback", methods=["GET"])
 def oauth2callback():
     state = request.args.get("state", "")
-    if not state or not secrets.compare_digest(state, session.get("oauth_state", "")):
+    if not state or not secrets.compare_digest(
+        state,
+        session.get("oauth_state", ""),
+    ):
         return "OAuth state mismatch. Restart authorization.", 400
+
     session.pop("oauth_state", None)
     with OAUTH_LOCK:
         pending = oauth_flows.pop(state, None)
+
     if pending is None or time.monotonic() - pending[2] > 600:
         return "OAuth flow expired. Restart authorization.", 400
+
     flow, channel, _ = pending
     if request.args.get("error"):
         return "YouTube authorization was not granted.", 400
+
     try:
-        flow.fetch_token(authorization_response=REDIRECT_URI + "?" + request.query_string.decode("utf-8"))
-        credentials = flow.credentials
-        youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
-        owned = youtube.channels().list(part="id,snippet", mine=True).execute().get("items", [])
-        if len(owned) != 1:
-            return "Select the Google account and YouTube channel to connect.", 400
-        actual_id = owned[0]["id"]
-        expected_handle = channel_profile(channel)["handle"]
-        if expected_handle:
-            expected = youtube.channels().list(part="id", forHandle=expected_handle).execute().get("items", [])
-            if not expected or actual_id != expected[0]["id"]:
-                return "Wrong channel selected. Sign in to the account owning the configured handle and try again. No credentials changed.", 400
-        if not credentials.refresh_token:
-            return "No offline authorization received. Restart authorization and grant access.", 400
-        if channel_profile(channel).get("token_env"):
-            # Show an ordinary page, rather than a JSON document that Chrome
-            # can block during the cross-site OAuth redirect as a download.
-            response = Response(
-                "<!doctype html><html><head><title>Channel 3 connected</title></head><body>"
-                "<h1>Channel 3 authorization successful</h1>"
-                "<p>Store this private token in Railway YOUTUBE_CHANNEL3_TOKEN_JSON, then redeploy.</p>"
-                '<textarea readonly aria-label="Railway channel 3 token" rows="14" cols="90">'
-                + escape(credentials.to_json()) + "</textarea></body></html>",
-                content_type="text/html; charset=utf-8",
+        flow.fetch_token(
+            authorization_response=(
+                REDIRECT_URI + "?" + request.query_string.decode("utf-8")
             )
-            response.headers["Cache-Control"] = "no-store"
-            response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
-            response.headers["Referrer-Policy"] = "no-referrer"
-            return response
+        )
+        credentials = flow.credentials
+
+        if not credentials.refresh_token:
+            return (
+                "No offline authorization received. Restart authorization and grant access.",
+                400,
+            )
+
+        youtube = build(
+            "youtube",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False,
+        )
+        owned = youtube.channels().list(
+            part="id,snippet",
+            mine=True,
+        ).execute().get("items", [])
+
+        if len(owned) != 1:
+            return (
+                "Google did not resolve exactly one YouTube channel. "
+                "Restart and select the intended YouTube channel.",
+                400,
+            )
+
+        actual_id = owned[0]["id"]
+        snippet = owned[0].get("snippet", {})
+        actual_title = snippet.get("title") or channel_profile(channel)["name"]
+
+        expected_handle = configured_handle(channel)
+        if expected_handle:
+            expected = youtube.channels().list(
+                part="id",
+                forHandle=expected_handle,
+            ).execute().get("items", [])
+            if not expected or actual_id != expected[0]["id"]:
+                return (
+                    f"Wrong channel selected for {channel_profile(channel)['name']}. "
+                    f"Expected @{expected_handle}. No credentials were changed.",
+                    400,
+                )
+
         save_credentials(credentials, channel)
-        return f"YouTube authorization successful for {channel_profile(channel)['name']}. Token saved."
+        save_channel_metadata(
+            channel,
+            {
+                "slot": channel,
+                "channel_id": actual_id,
+                "title": actual_title,
+                "custom_url": snippet.get("customUrl"),
+                "connected_at": iso_now(),
+            },
+        )
+
+        response = Response(
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<title>YouTube connected</title></head><body style='font-family:Arial;padding:40px'>"
+            f"<h1>{escape(channel_profile(channel)['name'])} connected successfully</h1>"
+            f"<p><strong>YouTube channel:</strong> {escape(actual_title)}</p>"
+            f"<p><strong>Channel ID:</strong> {escape(actual_id)}</p>"
+            "<p>The OAuth token was saved securely on the Railway persistent volume.</p>"
+            "<p><a href='/channels'>Back to all channel connections</a></p>"
+            "</body></html>",
+            content_type="text/html; charset=utf-8",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     except Exception as exc:
-        print(f"OAuth callback failed: {type(exc).__name__}", flush=True)
+        print(
+            f"OAuth callback failed for {channel}: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
         return "YouTube authorization failed. Restart authorization.", 500
 
 
