@@ -7,7 +7,11 @@ import json
 import secrets
 import re
 from html import escape
-from app.channels import (\n    DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file,\n    connected_channels, channel_connected, configured_handle,\n    load_channel_metadata, save_channel_metadata, channel_display_name,\n)
+from app.channels import (
+    DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file,
+    connected_channels, channel_connected, configured_handle,
+    load_channel_metadata, save_channel_metadata, channel_display_name,
+)
 
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -26,7 +30,10 @@ from app.video import (
     RANDOM_VIDEO_FILES,
     available_random_clips,
 )
-from app.youtube import (\n    upload_short, schedule_short, get_video_status, save_credentials,\n    get_thumbnail_status, get_youtube_service,\n)
+from app.youtube import (
+    upload_short, schedule_short, get_video_status, save_credentials,
+    get_thumbnail_status, get_youtube_service,
+)
 from googleapiclient.discovery import build
 from app.telegram import (
     telegram_webhook,
