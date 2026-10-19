@@ -3,7 +3,10 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from app.channels import (\n    DATA_DIR, DEFAULT_CHANNEL, token_file, channel_profile,\n    load_channel_metadata, configured_handle,\n)
+from app.channels import (
+    DATA_DIR, DEFAULT_CHANNEL, token_file, channel_profile,
+    load_channel_metadata, configured_handle,
+)
 from app.upload_ledger import UploadLedger
 import random
 import threading
