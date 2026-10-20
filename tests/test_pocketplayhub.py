@@ -1,4 +1,4 @@
-"""Verify independent production connections and scheduling for both new channels."""
+"""Verify independent production connections for channels sharing an OAuth client."""
 import os
 import sys
 import tempfile
@@ -16,12 +16,14 @@ from app import channels, main, youtube
 NEW_CHANNELS = {
     "pockettrade": ("PocketTrade-u1l", "UCvk8MuXoNlKVzLhTOz-6J7A"),
     "zingtrader": ("zingTrader-s5t", "UCHRmFCtnW7G5IfDvKkT-dtQ"),
+    "traderapex": ("TraderApex-d3d", "UCzpk7WMG4SLLtaMTiSqrUhA"),
 }
 
 
 class PocketplayhubTests(unittest.TestCase):
     def test_daily_slots_and_recovery(self):
-        for channel, hours in (("pockettrade", (12, 20)), ("zingtrader", (13, 21))):
+        for channel, hours in (("pockettrade", (12, 20)), ("zingtrader", (13, 21)),
+                               ("traderapex", (9, 17))):
             with self.subTest(channel=channel):
                 slots = main.get_required_scheduler_slots(
                     datetime(2026, 10, 20, 22, tzinfo=main.IST), channel)
@@ -43,7 +45,7 @@ class PocketplayhubTests(unittest.TestCase):
                 self.assertEqual(Path(channels.token_file(key)).read_text(), "token-" + key)
                 self.assertEqual(channels.load_channel_metadata(key), {"title": key})
             self.assertEqual(set(channels.connected_channels()), set(channels.CHANNELS))
-            self.assertEqual(len({channels.token_file(k) for k in channels.CHANNELS}), 5)
+            self.assertEqual(len({channels.token_file(k) for k in channels.CHANNELS}), 6)
 
     def test_same_time_buffer_entries_are_independent(self):
         slot = datetime(2026, 10, 21, 18, tzinfo=main.IST)
@@ -117,7 +119,7 @@ class PocketplayhubTests(unittest.TestCase):
                                        datetime(2026, 10, 21, 18, tzinfo=main.IST), key)
                 self.assertEqual(upload.call_args.kwargs["channel"], key)
 
-    def test_dashboard_exposes_both_new_connect_actions(self):
+    def test_dashboard_exposes_all_new_connect_actions(self):
         with patch.object(main, "channel_connected", return_value=False), \
                 patch.object(main, "load_channel_metadata", return_value={}):
             response = main.app.test_client().get("/channels")
