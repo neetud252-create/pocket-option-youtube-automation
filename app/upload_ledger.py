@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from zoneinfo import ZoneInfo
-from app.channels import DATA_DIR, channel_profile
+from app.channels import DATA_DIR, channel_profile, publication_times
 from app.storage_lock import storage_lock
 
 LOCK = threading.RLock()
@@ -52,7 +52,7 @@ class UploadLedger:
     def begin(self, channel, publish_at, video_path, title=""):
         channel_profile(channel)
         local = None if isinstance(publish_at, str) else publish_at.astimezone(ZoneInfo("Asia/Kolkata"))
-        if local and ((local.hour, local.minute) not in channel_profile(channel)["times"] or local.second or local.microsecond):
+        if local and ((local.hour, local.minute) not in publication_times(local.date(), channel) or local.second or local.microsecond):
             raise ValueError("Scheduled uploads must use a configured daily slot.")
         digest = hashlib.sha256()
         with open(video_path, "rb") as stream:
@@ -92,4 +92,5 @@ class UploadLedger:
             record.update(video_id=video_id, status="uploaded" if is_test else "scheduled", privacy_status="unlisted" if is_test else "private", completed_at=time.time(),
                           url=f"https://www.youtube.com/shorts/{video_id}")
             self.save(records)
+
 
