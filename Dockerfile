@@ -48,4 +48,3 @@ COPY . .
 # Exactly one Gunicorn worker is intentional: app.main starts one scheduler
 # thread, and multiple workers would create duplicate scheduler instances.
 CMD ["sh", "-c", "gunicorn --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:${PORT:-8080} app.main:app"]
-
