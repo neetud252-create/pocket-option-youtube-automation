@@ -1,6 +1,6 @@
 # Pocket Option YouTube Automation
 
-New uploads on both channels extract the frame at 00:02 from the final video
+New uploads on all connected channels extract the frame at 00:02 from the final video
 and submit it as a JPEG thumbnail. Temporary images are removed after upload.
 Transient thumbnail errors are retried without reuploading the video. Results
 are stored in `data/thumbnail_<video_id>.json` and scheduled buffer records.
@@ -119,4 +119,31 @@ Reuse that ID for retries, then read `/test-status` with the same parameters.
 Durable receipts save the remote video ID before thumbnail work. Uncertain
 upload outcomes stop automatic retries and require Studio reconciliation.
 Keep the persistent volume and single-worker deployment.
+
+## PocketTrade and zingTrader
+
+The two channels owned by pocketplayhub.team@gmail.com have independent slots:
+
+| Slot | Channel | Expected handle | Publication times (IST) |
+| --- | --- | --- | --- |
+| `pockettrade` | PocketTrade | `@PocketTrade-u1l` | 10:00 and 18:00 |
+| `zingtrader` | zingTrader | `@zingTrader-s5t` | 10:00 and 18:00 |
+
+Connect each from `/channels`, selecting its specific YouTube channel during
+Google consent. Both reuse the existing Go+ production OAuth client
+(`GOPLUS_YOUTUBE_CLIENT_ID` and `GOPLUS_YOUTUBE_CLIENT_SECRET`), while saving
+separate offline tokens and channel metadata on `/app/data`. No new client
+secret or Google Cloud project is needed.
+
+The expected handles are configured by default; if a handle changes, set
+`POCKETTRADE_YOUTUBE_HANDLE` or `ZINGTRADER_YOUTUBE_HANDLE`. The callback and
+upload client validate the selected channel against that handle, so choosing
+the wrong channel cannot replace the saved connection.
+
+Once connected, each channel automatically joins the existing 22:00 buffer
+preparation and future-slot recovery. Each Short gets its own script, voice,
+and render, with the same shared duplicate protection, description, music,
+and thumbnail workflow. The three existing schedules and saved tokens are
+unchanged.
+
 

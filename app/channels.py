@@ -1,6 +1,6 @@
 """Persistent multi-channel YouTube profiles.
 
-The first three automation slots use separate OAuth tokens on the Railway
+All five automation slots use separate OAuth tokens on the Railway
 volume. Two or more slots may belong to the same Gmail; the OAuth grant is
 still saved separately for each selected YouTube channel.
 """
@@ -38,6 +38,26 @@ CHANNELS = {
         "client_secret_env": "YOUTUBE_CHANNEL3_CLIENT_SECRET",
         "handle_env": "YOUTUBE_CHANNEL3_HANDLE",
     },
+    "pockettrade": {
+        "name": "Channel 4 - PocketTrade",
+        "times": ((10, 0), (18, 0)),
+        "token": "youtube_token_pockettrade.json",
+        "metadata": "youtube_channel_pockettrade.json",
+        "client_id_env": "GOPLUS_YOUTUBE_CLIENT_ID",
+        "client_secret_env": "GOPLUS_YOUTUBE_CLIENT_SECRET",
+        "handle_env": "POCKETTRADE_YOUTUBE_HANDLE",
+        "handle": "PocketTrade-u1l",
+    },
+    "zingtrader": {
+        "name": "Channel 5 - zingTrader",
+        "times": ((10, 0), (18, 0)),
+        "token": "youtube_token_zingtrader.json",
+        "metadata": "youtube_channel_zingtrader.json",
+        "client_id_env": "GOPLUS_YOUTUBE_CLIENT_ID",
+        "client_secret_env": "GOPLUS_YOUTUBE_CLIENT_SECRET",
+        "handle_env": "ZINGTRADER_YOUTUBE_HANDLE",
+        "handle": "zingTrader-s5t",
+    },
 }
 
 
@@ -56,8 +76,10 @@ def metadata_file(channel=DEFAULT_CHANNEL):
 
 
 def configured_handle(channel=DEFAULT_CHANNEL):
-    env_name = channel_profile(channel).get("handle_env")
-    return os.getenv(env_name, "").strip().lstrip("@") if env_name else ""
+    profile = channel_profile(channel)
+    env_name = profile.get("handle_env")
+    override = os.getenv(env_name, "").strip() if env_name else ""
+    return (override or profile.get("handle", "")).strip().lstrip("@")
 
 
 def load_channel_metadata(channel=DEFAULT_CHANNEL):
@@ -92,3 +114,4 @@ def connected_channels():
 def channel_display_name(channel=DEFAULT_CHANNEL):
     metadata = load_channel_metadata(channel)
     return metadata.get("title") or channel_profile(channel)["name"]
+
