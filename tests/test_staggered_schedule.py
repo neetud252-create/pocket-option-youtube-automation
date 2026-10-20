@@ -18,27 +18,29 @@ EXPECTED_HOURS = {
     "channel3": (6, 14),
     "pockettrade": (12, 20),
     "zingtrader": (13, 21),
+    "traderapex": (9, 17),
 }
 
 
 class StaggeredScheduleTests(unittest.TestCase):
-    def test_ten_distinct_slots_prepared_on_previous_evening(self):
+    def test_twelve_distinct_slots_prepared_on_previous_evening(self):
         now = datetime(2026, 10, 20, 22, tzinfo=main.IST)
+        self.assertEqual(set(EXPECTED_HOURS), set(channels.CHANNELS))
         all_slots = []
         for channel, hours in EXPECTED_HOURS.items():
             slots = main.get_required_scheduler_slots(now, channel)
             self.assertEqual([s.hour for s in slots], list(hours))
             self.assertTrue(all(s.date() == date(2026, 10, 21) for s in slots))
             all_slots.extend(slots)
-        self.assertEqual(len(set(all_slots)), 10)
+        self.assertEqual(len(set(all_slots)), 12)
         ordered = sorted(all_slots)
         self.assertTrue(all(b - a >= timedelta(hours=1)
                             for a, b in zip(ordered, ordered[1:])))
 
-    def test_transition_day_does_not_add_new_afternoon_slots(self):
+    def test_transition_day_preserves_old_channels_and_starts_new_channel(self):
         now = datetime(2026, 10, 20, 13, 30, tzinfo=main.IST)
         for channel in channels.CHANNELS:
-            expected = [] if channel == "channel3" else [18]
+            expected = {"channel3": [], "traderapex": [17]}.get(channel, [18])
             slots = main.get_required_scheduler_slots(now, channel)
             self.assertEqual([s.hour for s in slots], expected)
 
@@ -61,7 +63,7 @@ class StaggeredScheduleTests(unittest.TestCase):
                 slot = datetime(2026, 10, 21, hours[0], tzinfo=main.IST)
                 self.assertIsNone(ledger.begin(
                     channel, slot.astimezone(timezone.utc), str(video)))
-                for hour, minute in channels.PREVIOUS_TIMES[channel]:
+                for hour, minute in channels.PREVIOUS_TIMES.get(channel, ()):
                     if (hour, minute) not in channels.CHANNELS[channel]["times"]:
                         with self.assertRaises(ValueError):
                             ledger.begin(channel, slot.replace(hour=hour, minute=minute),
