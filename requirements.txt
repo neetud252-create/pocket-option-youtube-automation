@@ -5,7 +5,8 @@ google-auth-oauthlib
 google-auth-httplib2
 requests
 Pillow
-piper-tts
+piper-tts==1.8.0
 playwright
 Flask
 gunicorn
+
