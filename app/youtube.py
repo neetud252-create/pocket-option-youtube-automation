@@ -69,15 +69,19 @@ def get_youtube_service(channel=DEFAULT_CHANNEL):
 
         # Refresh proactively shortly before access-token expiry, rather than
         # waiting for an upload request to discover an expired access token.
+        expiry = credentials.expiry
+        expires_soon = False
+        if expiry is not None:
+            now_for_expiry = (
+                datetime.now(expiry.tzinfo)
+                if expiry.tzinfo is not None
+                else datetime.utcnow()
+            )
+            expires_soon = expiry <= now_for_expiry + timedelta(minutes=10)
+
         should_refresh = bool(
             credentials.refresh_token
-            and (
-                credentials.expired
-                or (
-                    credentials.expiry is not None
-                    and credentials.expiry <= datetime.now(timezone.utc) + timedelta(minutes=10)
-                )
-            )
+            and (credentials.expired or expires_soon)
         )
 
         if should_refresh:
