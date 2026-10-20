@@ -5,13 +5,13 @@ import tempfile
 from pathlib import Path
 from app.channels import (
     DATA_DIR, DEFAULT_CHANNEL, token_file, channel_profile,
-    load_channel_metadata, configured_handle,
+    load_channel_metadata, save_channel_metadata, configured_handle,
 )
 from app.upload_ledger import UploadLedger
 import random
 import threading
 import time
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 
 import httplib2
 
@@ -67,10 +67,26 @@ def get_youtube_service(channel=DEFAULT_CHANNEL):
         # refresh token and channel identity.
         credentials = Credentials.from_authorized_user_file(destination)
 
-        if credentials.expired and credentials.refresh_token:
+        # Refresh proactively shortly before access-token expiry, rather than
+        # waiting for an upload request to discover an expired access token.
+        should_refresh = bool(
+            credentials.refresh_token
+            and (
+                credentials.expired
+                or (
+                    credentials.expiry is not None
+                    and credentials.expiry <= datetime.now(timezone.utc) + timedelta(minutes=10)
+                )
+            )
+        )
+
+        if should_refresh:
             try:
                 credentials.refresh(Request())
                 save_credentials(credentials, channel)
+                metadata = load_channel_metadata(channel)
+                metadata["last_token_refresh_at"] = datetime.now(timezone.utc).isoformat()
+                save_channel_metadata(channel, metadata)
                 print(f"YouTube OAuth token refreshed for {channel}.", flush=True)
             except Exception as exc:
                 print(
@@ -123,6 +139,15 @@ def get_youtube_service(channel=DEFAULT_CHANNEL):
                 raise RuntimeError(
                     f"Saved token for {channel_profile(channel)['name']} does not match @{expected_handle}."
                 )
+
+        metadata = load_channel_metadata(channel)
+        metadata.update({
+            "slot": channel,
+            "channel_id": actual_id,
+            "title": owned[0].get("snippet", {}).get("title") or metadata.get("title"),
+            "last_verified_at": datetime.now(timezone.utc).isoformat(),
+        })
+        save_channel_metadata(channel, metadata)
 
         return service
 
