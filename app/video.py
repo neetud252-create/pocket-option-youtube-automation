@@ -669,7 +669,7 @@ def mux_audio(
             "+faststart",
             output_path,
         ],
-        "Mixing ElevenLabs voice with low-volume background music",
+        "Mixing narration with low-volume background music",
     )
 
     print(

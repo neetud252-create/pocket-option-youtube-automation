@@ -30,11 +30,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # the daily automation alive if ElevenLabs has a key/quota/outage issue.
 RUN mkdir -p /app/voices \
     && wget -q --tries=3 --timeout=30 \
-    "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx" \
-    -O /app/voices/en_US-lessac-medium.onnx \
+    "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/high/en_US-lessac-high.onnx" \
+    -O /app/voices/en_US-lessac-high.onnx \
     && wget -q --tries=3 --timeout=30 \
-    "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json" \
-    -O /app/voices/en_US-lessac-medium.onnx.json
+    "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/high/en_US-lessac-high.onnx.json" \
+    -O /app/voices/en_US-lessac-high.onnx.json
+
+# Exercise the actual Linux runtime/model before accepting the image.
+RUN python -m piper -m /app/voices/en_US-lessac-high.onnx \
+    -f /tmp/piper-quality-check.wav -- "Voice quality check." \
+    && ffprobe -v error -show_entries stream=codec_name,sample_rate \
+       -of default=noprint_wrappers=1 /tmp/piper-quality-check.wav \
+    && rm /tmp/piper-quality-check.wav
 
 COPY . .
 

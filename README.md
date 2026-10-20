@@ -20,6 +20,21 @@ Planned workflow:
 7. Track content history to reduce repetition
 
 Secrets will be stored in Railway environment variables, not in GitHub.
+
+## Piper voice quality
+
+The free local fallback uses `en_US-lessac-high` with Piper 1.8.0. Piper audio
+stays in lossless WAV through pause processing, timing, and music preparation;
+the final video receives the AAC encode. Sentence pauses are preserved more
+gently, and narration prefers at most 10% acceleration when it fits the
+existing 20–26-second Short. Longer speech uses the full 21-second narration
+slot, subject to the existing 30% speed limit. The CTA remains five seconds.
+
+`PIPER_MODEL_PATH` can override the bundled voice; health checks use that same
+path. Generation logs and audio metadata report the actual provider and model.
+ElevenLabs remains preferred when available. The change applies to newly
+generated Shorts, including all five channels; queued videos keep their audio.
+
 # Daily publication schedule
 
 Every day at 22:00 Asia/Kolkata, the scheduler prepares the next calendar day's

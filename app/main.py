@@ -24,7 +24,7 @@ from google_auth_oauthlib.flow import Flow
 from app.config import YOUTUBE_DESCRIPTION
 from app.upload_ledger import UploadLedger
 from app.content import generate_content
-from app.voice import generate_voice
+from app.voice import generate_voice, PIPER_MODEL
 from app.video import (
     generate_video,
     ASSETS_DIR,
@@ -57,7 +57,7 @@ app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESS
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 BUFFER_FILE = os.path.join(DATA_DIR, "buffer_queue.json")
 YOUTUBE_TOKEN_FILE = os.path.join(DATA_DIR, "youtube_token.json")
-PIPER_MODEL_FILE = "/app/voices/en_US-lessac-medium.onnx"
+PIPER_MODEL_FILE = PIPER_MODEL
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -345,7 +345,7 @@ def create_and_schedule_short(publish_at, reason="BUFFER", channel=DEFAULT_CHANN
 
     voice_path = os.path.join(
         OUTPUT_DIR,
-        f"voice_{unique_name}.mp3",
+        f"voice_{unique_name}.wav",
     )
     video_filename = f"short_{unique_name}.mp4"
     video_path = None
@@ -534,7 +534,7 @@ def create_and_upload_short(channel=DEFAULT_CHANNEL, test_id=None):
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     voice_path = os.path.join(
         OUTPUT_DIR,
-        f"test_voice_{timestamp}.mp3",
+        f"test_voice_{timestamp}.wav",
     )
     video_path = None
 
@@ -889,6 +889,7 @@ def health():
         "piper_fallback_ready": (
             preflight["piper_model"] and preflight["piper"]
         ),
+        "piper_model": os.path.basename(PIPER_MODEL_FILE),
         "cta_video_ready": preflight["cta_video"],
         "normal_clips_found": preflight["normal_clips_found"],
         "internal_runtime_ready": internal_ready,

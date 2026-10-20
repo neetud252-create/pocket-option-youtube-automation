@@ -30,7 +30,7 @@ MODEL_ID = os.getenv(
 
 PIPER_MODEL = os.getenv(
     "PIPER_MODEL_PATH",
-    "/app/voices/en_US-lessac-medium.onnx",
+    "/app/voices/en_US-lessac-high.onnx",
 )
 
 CTA_AUDIO_SECONDS = 5.0
@@ -44,6 +44,9 @@ ELEVENLABS_RETRIES = 3
 SILENCE_THRESHOLD_DB = -45
 LONG_PAUSE_SECONDS = 0.12
 KEPT_PAUSE_SECONDS = 0.025
+# Preserve more of Piper's sentence rhythm instead of cutting every short pause.
+PIPER_LONG_PAUSE_SECONDS = 0.25
+PIPER_KEPT_PAUSE_SECONDS = 0.09
 
 
 # ============================================================
@@ -260,6 +263,7 @@ def elevenlabs_tts(text, output_path, previous_text=None, next_text=None):
 # ============================================================
 
 def piper_tts(text, output_path):
+    """Keep Piper's generated audio lossless until the final video encode."""
     if shutil.which("piper") is None:
         raise RuntimeError("Piper executable is not installed.")
 
@@ -267,48 +271,14 @@ def piper_tts(text, output_path):
         raise RuntimeError(f"Piper model is missing: {PIPER_MODEL}")
 
     wav_path = os.path.splitext(output_path)[0] + "_piper.wav"
-
-    try:
-        run_command(
-            [
-                "piper",
-                "--model",
-                PIPER_MODEL,
-                "--output_file",
-                wav_path,
-            ],
-            "Generating local Piper voice",
-            input_text=clean_spoken_text(text) + "\n",
-            timeout=180,
-        )
-
-        validate_audio(wav_path)
-
-        run_command(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                wav_path,
-                "-vn",
-                "-c:a",
-                "libmp3lame",
-                "-b:a",
-                "128k",
-                "-ar",
-                "44100",
-                "-ac",
-                "1",
-                output_path,
-            ],
-            "Converting Piper voice to MP3",
-        )
-
-        validate_audio(output_path)
-        return output_path
-
-    finally:
-        safe_remove(wav_path)
+    run_command(
+        ["piper", "--model", PIPER_MODEL, "--output_file", wav_path],
+        f"Generating local Piper voice: {os.path.basename(PIPER_MODEL)}",
+        input_text=clean_spoken_text(text) + "\n",
+        timeout=180,
+    )
+    validate_audio(wav_path)
+    return wav_path
 
 
 def generate_raw_segment(text, output_path, require_elevenlabs=False, **context):
@@ -316,7 +286,7 @@ def generate_raw_segment(text, output_path, require_elevenlabs=False, **context)
         if os.getenv("ELEVENLABS_API_KEY"):
             elevenlabs_tts(text, output_path, **context)
             print("Voice provider: ElevenLabs", flush=True)
-            return "elevenlabs"
+            return "elevenlabs", output_path
     except Exception as exc:
         print(f"ElevenLabs generation error: {exc}", flush=True)
         safe_remove(output_path)
@@ -329,26 +299,28 @@ def generate_raw_segment(text, output_path, require_elevenlabs=False, **context)
             "but ElevenLabs is unavailable."
         )
 
-    piper_tts(text, output_path)
+    wav_path = piper_tts(text, output_path)
     print("Voice provider: Piper fallback", flush=True)
-    return "piper"
+    return "piper", wav_path
 
 
 # ============================================================
 # TIMING / ALIGNMENT
 # ============================================================
 
-def compact_silence(input_path, output_path):
+def compact_silence(input_path, output_path, provider="elevenlabs"):
     """Reduce long sentence pauses to a quick, natural beat."""
     validate_audio(input_path)
 
+    long_pause = PIPER_LONG_PAUSE_SECONDS if provider == "piper" else LONG_PAUSE_SECONDS
+    kept_pause = PIPER_KEPT_PAUSE_SECONDS if provider == "piper" else KEPT_PAUSE_SECONDS
     silence_filter = (
         "silenceremove="
         f"start_periods=1:start_duration=0.02:"
         f"start_threshold={SILENCE_THRESHOLD_DB}dB:"
-        f"stop_periods=-1:stop_duration={LONG_PAUSE_SECONDS:.2f}:"
+        f"stop_periods=-1:stop_duration={long_pause:.2f}:"
         f"stop_threshold={SILENCE_THRESHOLD_DB}dB:"
-        f"stop_silence={KEPT_PAUSE_SECONDS:.3f},"
+        f"stop_silence={kept_pause:.3f},"
         "areverse,silenceremove=start_periods=1:start_duration=0:"
         f"start_threshold={SILENCE_THRESHOLD_DB}dB,areverse"
     )
@@ -395,7 +367,7 @@ def atempo_filters_for_factor(speed_factor):
     return filters
 
 
-def choose_main_duration(raw_seconds):
+def choose_main_duration(raw_seconds, provider="elevenlabs"):
     """Random frame-aligned length, with no slowdown or excessive rushing."""
     low = max(MIN_MAIN_FRAMES, math.ceil(raw_seconds / 1.30 * FPS))
     high = min(MAX_MAIN_FRAMES, math.floor(raw_seconds * FPS))
@@ -404,6 +376,10 @@ def choose_main_duration(raw_seconds):
             f"Narration length {raw_seconds:.2f}s cannot fit a 20-26s Short "
             "at natural-to-fast speed. Regenerate the script."
         )
+    if provider == "piper":
+        # Prefer <=10% acceleration. If speech needs more time, use the longest
+        # available slot while retaining the existing 30% safety ceiling.
+        low = max(low, min(high, math.ceil(raw_seconds / 1.10 * FPS)))
     return random.randint(low, high) / FPS
 
 
@@ -446,10 +422,12 @@ def verify_cta_join(path, cta_start):
 
 
 def join_audio(main_path, cta_path, output_path, final_seconds, cta_start):
+    codec = (["-c:a", "pcm_s16le"] if output_path.lower().endswith(".wav")
+             else ["-c:a", "libmp3lame", "-b:a", "192k"])
     run_command([
         "ffmpeg", "-y", "-i", main_path, "-i", cta_path,
         "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[a]",
-        "-map", "[a]", "-c:a", "libmp3lame", "-b:a", "192k",
+        "-map", "[a]", *codec,
         "-ar", "44100", "-ac", "1", output_path,
     ], "Joining narration directly into the fixed 5-second CTA")
     duration = validate_audio(output_path)
@@ -510,23 +488,23 @@ def generate_voice(
     print(f"Require ElevenLabs: {require_elevenlabs}", flush=True)
 
     try:
-        main_provider = generate_raw_segment(
+        main_provider, raw_main = generate_raw_segment(
             clean_text,
             raw_main,
             require_elevenlabs=require_elevenlabs,
             next_text=clean_cta,
         )
-        cta_provider = generate_raw_segment(
+        cta_provider, raw_cta = generate_raw_segment(
             clean_cta,
             raw_cta,
             require_elevenlabs=require_elevenlabs,
             previous_text=clean_text,
         )
 
-        compact_silence(raw_main, compact_main)
-        compact_silence(raw_cta, compact_cta)
+        compact_silence(raw_main, compact_main, main_provider)
+        compact_silence(raw_cta, compact_cta, cta_provider)
 
-        main_seconds = choose_main_duration(audio_duration(compact_main))
+        main_seconds = choose_main_duration(audio_duration(compact_main), main_provider)
         final_seconds = main_seconds + CTA_AUDIO_SECONDS
         print(f"RANDOM TIMELINE | total={final_seconds:.3f}s | main={main_seconds:.3f}s | CTA=5.000s", flush=True)
         main_timing = fit_audio(
@@ -553,13 +531,14 @@ def generate_voice(
             "cta_text": clean_cta,
             "main_provider": main_provider,
             "cta_provider": cta_provider,
+            "piper_model": os.path.basename(PIPER_MODEL) if "piper" in (main_provider, cta_provider) else None,
             "main_timing": main_timing,
             "cta_timing": cta_timing,
             "elevenlabs_speed": 1.08,
             "pause_compaction": {
                 "threshold_db": SILENCE_THRESHOLD_DB,
-                "long_pause_seconds": LONG_PAUSE_SECONDS,
-                "kept_pause_seconds": KEPT_PAUSE_SECONDS,
+                "long_pause_seconds": PIPER_LONG_PAUSE_SECONDS if main_provider == "piper" else LONG_PAUSE_SECONDS,
+                "kept_pause_seconds": PIPER_KEPT_PAUSE_SECONDS if main_provider == "piper" else KEPT_PAUSE_SECONDS,
             },
             "cta_start": main_seconds,
             "cta_end": final_seconds,
@@ -578,8 +557,9 @@ def generate_voice(
             )
 
         print(
-            "Voice complete: energetic ElevenLabs pacing, "
-            f"continuous speech, natural-speed CTA={main_seconds:.3f}-{final_seconds:.3f}s",
+            f"Voice complete: main={main_provider}, CTA={cta_provider}, "
+            f"speech speed={main_timing['speed_factor']:.3f}x, "
+            f"CTA={main_seconds:.3f}-{final_seconds:.3f}s",
             flush=True,
         )
 
