@@ -1080,7 +1080,7 @@ def authorize():
                 "redirect_uris": [REDIRECT_URI],
             }
         },
-        scopes=SCOPES,
+        scopes=profile.get("scopes", SCOPES),
         redirect_uri=REDIRECT_URI,
     )
     url, state = flow.authorization_url(
@@ -1271,4 +1271,5 @@ if os.getenv("DISABLE_BACKGROUND_THREADS") != "1":
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
+
 
