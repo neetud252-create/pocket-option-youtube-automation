@@ -1,6 +1,6 @@
 """Persistent multi-channel YouTube profiles.
 
-All five automation slots use separate OAuth tokens on the Railway
+All six automation slots use separate OAuth tokens on the Railway
 volume. Two or more slots may belong to the same Gmail; the OAuth grant is
 still saved separately for each selected YouTube channel.
 """
@@ -74,6 +74,17 @@ CHANNELS = {
         "handle_env": "ZINGTRADER_YOUTUBE_HANDLE",
         "handle": "zingTrader-s5t",
     },
+    "traderapex": {
+        "name": "Channel 6 - TraderApex",
+        "scopes": UPLOAD_SCOPES,
+        "times": ((9, 0), (17, 0)),
+        "token": "youtube_token_traderapex.json",
+        "metadata": "youtube_channel_traderapex.json",
+        "client_id_env": "GOPLUS_YOUTUBE_CLIENT_ID",
+        "client_secret_env": "GOPLUS_YOUTUBE_CLIENT_SECRET",
+        "handle_env": "TRADERAPEX_YOUTUBE_HANDLE",
+        "handle": "TraderApex-d3d",
+    },
 }
 
 
@@ -87,7 +98,7 @@ def publication_times(target_date, channel=DEFAULT_CHANNEL):
     """Choose by the IST publication date, including advance preparation."""
     profile = channel_profile(channel)
     if target_date < SCHEDULE_EFFECTIVE_DATE:
-        return PREVIOUS_TIMES[channel]
+        return PREVIOUS_TIMES.get(channel, profile["times"])
     return profile["times"]
 
 
