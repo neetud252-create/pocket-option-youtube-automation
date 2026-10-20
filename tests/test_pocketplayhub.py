@@ -58,10 +58,14 @@ class PocketplayhubTests(unittest.TestCase):
             flow.authorization_url.return_value = ("https://accounts.google.com/mock", channel)
             with patch.dict(os.environ, GOPLUS_YOUTUBE_CLIENT_ID="production-client",
                             GOPLUS_YOUTUBE_CLIENT_SECRET="test-secret"), \
+                    patch.object(main, "SCOPES", [
+                        *channels.UPLOAD_SCOPES,
+                        "https://www.googleapis.com/auth/youtube.force-ssl"]), \
                     patch.object(main.Flow, "from_client_config", return_value=flow) as factory:
                 response = main.app.test_client().get("/authorize?channel=" + channel)
                 self.assertEqual(response.status_code, 302)
                 self.assertEqual(factory.call_args.args[0]["web"]["client_id"], "production-client")
+                self.assertEqual(tuple(factory.call_args.kwargs["scopes"]), channels.UPLOAD_SCOPES)
                 self.assertEqual(flow.authorization_url.call_args.kwargs["access_type"], "offline")
 
     def test_default_handle_cannot_be_disabled_by_empty_override(self):
