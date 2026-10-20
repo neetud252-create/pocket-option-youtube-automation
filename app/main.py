@@ -11,6 +11,7 @@ from app.channels import (
     DATA_DIR, DEFAULT_CHANNEL, CHANNELS, channel_profile, token_file,
     connected_channels, channel_connected, configured_handle,
     load_channel_metadata, save_channel_metadata, channel_display_name,
+    publication_times, SCHEDULE_EFFECTIVE_DATE,
 )
 
 from datetime import datetime, timedelta, timezone
@@ -215,7 +216,7 @@ def get_slots_for_date(target_date, channel=DEFAULT_CHANNEL):
             minute,
             tzinfo=IST,
         )
-        for hour, minute in channel_profile(channel)["times"]
+        for hour, minute in publication_times(target_date, channel)
     ]
 
 
@@ -828,10 +829,12 @@ def home():
             "LIVE" if state.get("enabled", True) else "PAUSED"
         ),
         "creation_time": "22:00 IST",
+        "schedule_effective_date": SCHEDULE_EFFECTIVE_DATE.isoformat(),
         "publish_times": ["10:00 IST", "18:00 IST"],
         "channels": {
             key: {"name": profile["name"], "connected": channel_connected(key),
                   "missing_required_slots": [s.isoformat() for s in missing_slots(get_required_scheduler_slots(channel=key), channel=key)],
+                  "today_publish_times": [f"{h:02d}:{m:02d} IST" for h, m in publication_times(now_ist().date(), key)],
                   "publish_times": [f"{h:02d}:{m:02d} IST" for h, m in profile["times"]]}
             for key, profile in CHANNELS.items()
         },
@@ -870,10 +873,12 @@ def health():
             "LIVE" if state.get("enabled", True) else "PAUSED"
         ),
         "creation_time": "22:00 IST",
+        "schedule_effective_date": SCHEDULE_EFFECTIVE_DATE.isoformat(),
         "publish_times": ["10:00 IST", "18:00 IST"],
         "channels": {
             key: {"name": profile["name"], "connected": channel_connected(key),
                   "missing_required_slots": [s.isoformat() for s in missing_slots(get_required_scheduler_slots(channel=key), channel=key)],
+                  "today_publish_times": [f"{h:02d}:{m:02d} IST" for h, m in publication_times(now_ist().date(), key)],
                   "publish_times": [f"{h:02d}:{m:02d} IST" for h, m in profile["times"]]}
             for key, profile in CHANNELS.items()
         },
