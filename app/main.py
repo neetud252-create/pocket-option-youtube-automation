@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, jsonify, redirect, request, session
+from app.branding import branding
 from google_auth_oauthlib.flow import Flow
 
 from app.config import YOUTUBE_DESCRIPTION
@@ -48,6 +49,7 @@ from app.telegram import (
 # ============================================================
 
 app = Flask(__name__)
+app.register_blueprint(branding)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
