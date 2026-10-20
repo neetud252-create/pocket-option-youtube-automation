@@ -33,7 +33,7 @@ slot, subject to the existing 30% speed limit. The CTA remains five seconds.
 `PIPER_MODEL_PATH` can override the bundled voice; health checks use that same
 path. Generation logs and audio metadata report the actual provider and model.
 ElevenLabs remains preferred when available. The change applies to newly
-generated Shorts, including all five channels; queued videos keep their audio.
+generated Shorts, including all six channels; queued videos keep their audio.
 
 # Daily publication schedule
 
@@ -43,12 +43,13 @@ Shorts. From **21 October 2026**, the publication timetable is:
 | Channel | First Short (IST) | Second Short (IST) |
 | --- | --- | --- |
 | traderFx | 06:00 | 14:00 |
+| TraderApex | 09:00 | 17:00 |
 | Apex Trader | 10:00 | 18:00 |
 | Go+ Trader | 11:00 | 19:00 |
 | PocketTrade | 12:00 | 20:00 |
 | zingTrader | 13:00 | 21:00 |
 
-All ten daily slots are distinct, with at least one hour between channels.
+All twelve daily slots are distinct, with at least one hour between channels.
 The timetable is selected by the publication date, so the 20 October 22:00
 preparation uses the new times for 21 October. Already-queued 20 October Shorts
 keep their old times; same-day recovery also keeps that day's old schedule to
@@ -173,5 +174,25 @@ Once connected, each channel automatically joins the existing 22:00 buffer
 preparation and future-slot recovery. Each Short gets its own script, voice,
 and render, with the same shared duplicate protection, description, music,
 and thumbnail workflow. Each channel retains its separate saved token.
+
+## TraderApex
+
+The sixth channel, `@TraderApex-d3d` (`UCzpk7WMG4SLLtaMTiSqrUhA`), uses
+the `traderapex` profile with daily publication at **09:00 and 17:00 IST**.
+It starts these times immediately when connected, including before the
+21 October timetable transition for the five existing channels.
+
+Connect it from `/channels` and select **TraderApex** under the Gmail that
+owns Apex Trader. It reuses the existing production OAuth client configured
+by `GOPLUS_YOUTUBE_CLIENT_ID` and `GOPLUS_YOUTUBE_CLIENT_SECRET`, requesting
+YouTube read/upload access and offline access for scheduled uploads.
+Its token and metadata are saved separately as `youtube_token_traderapex.json`
+and `youtube_channel_traderapex.json` on the persistent volume.
+The expected handle is checked before saving a connection or uploading;
+`TRADERAPEX_YOUTUBE_HANDLE` can override it if the channel handle changes.
+
+TraderApex uses the same 22:00 preparation, future-slot recovery, script and
+clip duplicate protection, improved Piper fallback, music, description, and
+thumbnail workflow as the other channels.
 
 
