@@ -20,11 +20,24 @@ Planned workflow:
 7. Track content history to reduce repetition
 
 Secrets will be stored in Railway environment variables, not in GitHub.
-# Two-channel schedule
+# Daily publication schedule
 
 Every day at 22:00 Asia/Kolkata, the scheduler prepares the next calendar day's
-Shorts. The original channel retains 10:00 and 18:00; @goplustrader uses 00:00
-and 18:00. Midnight means the start of tomorrow, two hours after creation.
+Shorts. From **21 October 2026**, the publication timetable is:
+
+| Channel | First Short (IST) | Second Short (IST) |
+| --- | --- | --- |
+| traderFx | 06:00 | 14:00 |
+| Apex Trader | 10:00 | 18:00 |
+| Go+ Trader | 11:00 | 19:00 |
+| PocketTrade | 12:00 | 20:00 |
+| zingTrader | 13:00 | 21:00 |
+
+All ten daily slots are distinct, with at least one hour between channels.
+The timetable is selected by the publication date, so the 20 October 22:00
+preparation uses the new times for 21 October. Already-queued 20 October Shorts
+keep their old times; same-day recovery also keeps that day's old schedule to
+avoid extra uploads during the transition.
 
 Connect the second Google account at `/authorize?channel=goplustrader` after
 deploying this version. Select the account owning @goplustrader. The callback
@@ -37,10 +50,11 @@ The new channel participates automatically once authorized. Each slot creates
 its own script, voiceover, and rendered video using the existing voice/music
 settings. Both channels share `content_history.json`, including duplicate and
 similarity rejection. An unreadable history stops creation rather than permitting
-repeated scripts. The buffer is keyed by channel and publishing timestamp, so
-both 18:00 slots coexist. Legacy records belong to the original channel.
+repeated scripts. The buffer is keyed by channel and publishing timestamp.
+Legacy records belong to the original channel.
 
-`/health` reports each channel's connection, schedule, and missing slots.
+`/health` reports each channel's connection, new schedule, today's active times,
+the schedule's effective date, and missing slots.
 Manual recovery accepts `/fill-required?channel=goplustrader`; tomorrow-only
 preparation accepts `/fill-buffer?channel=goplustrader`. Recovery skips past
 slots. Keep one scheduler process and persistent `/app/data` storage, as before.
@@ -94,7 +108,7 @@ the admin receives Approve and Reject buttons inside Telegram.
 # Third YouTube channel
 
 Channel 3 uses the same one-day buffer: at 22:00 Asia/Kolkata, prepare the next
-day's 01:00 and 06:00 Shorts. Recovery fills only future slots. Two configured
+day's 06:00 and 14:00 Shorts. Recovery fills only future slots. Two configured
 publication slots per day remain independent from an explicitly requested
 unlisted test upload.
 
@@ -126,8 +140,8 @@ The two channels owned by pocketplayhub.team@gmail.com have independent slots:
 
 | Slot | Channel | Expected handle | Publication times (IST) |
 | --- | --- | --- | --- |
-| `pockettrade` | PocketTrade | `@PocketTrade-u1l` | 10:00 and 18:00 |
-| `zingtrader` | zingTrader | `@zingTrader-s5t` | 10:00 and 18:00 |
+| `pockettrade` | PocketTrade | `@PocketTrade-u1l` | 12:00 and 20:00 |
+| `zingtrader` | zingTrader | `@zingTrader-s5t` | 13:00 and 21:00 |
 
 Connect each from `/channels`, selecting its specific YouTube channel during
 Google consent. Both reuse the existing Go+ production OAuth client
@@ -143,7 +157,6 @@ the wrong channel cannot replace the saved connection.
 Once connected, each channel automatically joins the existing 22:00 buffer
 preparation and future-slot recovery. Each Short gets its own script, voice,
 and render, with the same shared duplicate protection, description, music,
-and thumbnail workflow. The three existing schedules and saved tokens are
-unchanged.
+and thumbnail workflow. Each channel retains its separate saved token.
 
 

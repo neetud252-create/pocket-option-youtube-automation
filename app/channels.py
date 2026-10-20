@@ -6,9 +6,19 @@ still saved separately for each selected YouTube channel.
 """
 import json
 import os
+from datetime import date
 
 DATA_DIR = os.getenv("AUTOMATION_DATA_DIR", "/app/data")
 DEFAULT_CHANNEL = "default"
+SCHEDULE_EFFECTIVE_DATE = date(2026, 10, 21)
+# Preserve the already-queued publication day during the timetable change.
+PREVIOUS_TIMES = {
+    "default": ((10, 0), (18, 0)),
+    "goplustrader": ((0, 0), (18, 0)),
+    "channel3": ((1, 0), (6, 0)),
+    "pockettrade": ((10, 0), (18, 0)),
+    "zingtrader": ((10, 0), (18, 0)),
+}
 UPLOAD_SCOPES = (
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
@@ -26,7 +36,7 @@ CHANNELS = {
     },
     "goplustrader": {
         "name": "Channel 2",
-        "times": ((0, 0), (18, 0)),
+        "times": ((11, 0), (19, 0)),
         "token": "youtube_token_goplustrader.json",
         "metadata": "youtube_channel_goplustrader.json",
         "client_id_env": "GOPLUS_YOUTUBE_CLIENT_ID",
@@ -35,7 +45,7 @@ CHANNELS = {
     },
     "channel3": {
         "name": "Channel 3",
-        "times": ((1, 0), (6, 0)),
+        "times": ((6, 0), (14, 0)),
         "token": "youtube_token_channel3.json",
         "metadata": "youtube_channel_channel3.json",
         "client_id_env": "YOUTUBE_CHANNEL3_CLIENT_ID",
@@ -45,7 +55,7 @@ CHANNELS = {
     "pockettrade": {
         "name": "Channel 4 - PocketTrade",
         "scopes": UPLOAD_SCOPES,
-        "times": ((10, 0), (18, 0)),
+        "times": ((12, 0), (20, 0)),
         "token": "youtube_token_pockettrade.json",
         "metadata": "youtube_channel_pockettrade.json",
         "client_id_env": "GOPLUS_YOUTUBE_CLIENT_ID",
@@ -56,7 +66,7 @@ CHANNELS = {
     "zingtrader": {
         "name": "Channel 5 - zingTrader",
         "scopes": UPLOAD_SCOPES,
-        "times": ((10, 0), (18, 0)),
+        "times": ((13, 0), (21, 0)),
         "token": "youtube_token_zingtrader.json",
         "metadata": "youtube_channel_zingtrader.json",
         "client_id_env": "GOPLUS_YOUTUBE_CLIENT_ID",
@@ -71,6 +81,14 @@ def channel_profile(channel=DEFAULT_CHANNEL):
     if channel not in CHANNELS:
         raise ValueError("Unknown YouTube channel")
     return CHANNELS[channel]
+
+
+def publication_times(target_date, channel=DEFAULT_CHANNEL):
+    """Choose by the IST publication date, including advance preparation."""
+    profile = channel_profile(channel)
+    if target_date < SCHEDULE_EFFECTIVE_DATE:
+        return PREVIOUS_TIMES[channel]
+    return profile["times"]
 
 
 def token_file(channel=DEFAULT_CHANNEL):

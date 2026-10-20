@@ -21,16 +21,16 @@ NEW_CHANNELS = {
 
 class PocketplayhubTests(unittest.TestCase):
     def test_daily_slots_and_recovery(self):
-        for channel in NEW_CHANNELS:
+        for channel, hours in (("pockettrade", (12, 20)), ("zingtrader", (13, 21))):
             with self.subTest(channel=channel):
                 slots = main.get_required_scheduler_slots(
                     datetime(2026, 10, 20, 22, tzinfo=main.IST), channel)
                 self.assertEqual(
                     [(s.date(), s.hour, s.minute) for s in slots],
-                    [(date(2026, 10, 21), 10, 0), (date(2026, 10, 21), 18, 0)])
+                    [(date(2026, 10, 21), hour, 0) for hour in hours])
                 remaining = main.get_required_scheduler_slots(
-                    datetime(2026, 10, 21, 10, tzinfo=main.IST), channel)
-                self.assertEqual([s.hour for s in remaining], [18])
+                    datetime(2026, 10, 21, hours[0], tzinfo=main.IST), channel)
+                self.assertEqual([s.hour for s in remaining], [hours[1]])
 
     def test_separate_storage_preserves_all_existing_credentials(self):
         with tempfile.TemporaryDirectory() as directory, \
