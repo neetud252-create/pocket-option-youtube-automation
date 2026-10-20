@@ -682,6 +682,49 @@ def youtube_monitor_loop():
         time.sleep(YOUTUBE_MONITOR_SECONDS)
 
 
+def oauth_health_loop():
+    """Continuously validate every connected channel and refresh access tokens early."""
+    print("YouTube OAuth health monitor started.", flush=True)
+
+    while True:
+        for channel in CHANNELS:
+            if not channel_connected(channel):
+                continue
+            try:
+                youtube = get_youtube_service(channel)
+                owned = youtube.channels().list(
+                    part="id,snippet",
+                    mine=True,
+                ).execute().get("items", [])
+                if len(owned) != 1:
+                    raise RuntimeError("Google did not resolve exactly one owned channel.")
+
+                item = owned[0]
+                metadata = load_channel_metadata(channel)
+                expected_id = metadata.get("channel_id")
+                if expected_id and item.get("id") != expected_id:
+                    raise RuntimeError("OAuth token resolved to a different YouTube channel.")
+
+                print(
+                    "OAUTH HEALTH OK | "
+                    f"{channel} | "
+                    f"{item.get('snippet', {}).get('title', channel)} | "
+                    f"{item.get('id', '')}",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(
+                    f"OAUTH HEALTH ERROR | {channel} | {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                record_error(exc)
+
+        # Access tokens normally last about an hour. Checking every 30 minutes,
+        # together with the 10-minute proactive refresh window in youtube.py,
+        # keeps valid refresh tokens warm without excessive Google API traffic.
+        time.sleep(1800)
+
+
 # ============================================================
 # ROBUST 10 PM SCHEDULER + CATCH-UP
 # ============================================================
@@ -1190,6 +1233,12 @@ def start_background_threads():
             target=youtube_monitor_loop,
             daemon=True,
             name="youtube-monitor",
+        ).start()
+
+        threading.Thread(
+            target=oauth_health_loop,
+            daemon=True,
+            name="oauth-health-monitor",
         ).start()
 
         def start_telegram():
