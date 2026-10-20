@@ -818,4 +818,3 @@ def generate_video(
             ignore_errors=True,
         )
 
-
