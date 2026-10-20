@@ -9,6 +9,10 @@ import os
 
 DATA_DIR = os.getenv("AUTOMATION_DATA_DIR", "/app/data")
 DEFAULT_CHANNEL = "default"
+UPLOAD_SCOPES = (
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+)
 
 CHANNELS = {
     "default": {
@@ -40,6 +44,7 @@ CHANNELS = {
     },
     "pockettrade": {
         "name": "Channel 4 - PocketTrade",
+        "scopes": UPLOAD_SCOPES,
         "times": ((10, 0), (18, 0)),
         "token": "youtube_token_pockettrade.json",
         "metadata": "youtube_channel_pockettrade.json",
@@ -50,6 +55,7 @@ CHANNELS = {
     },
     "zingtrader": {
         "name": "Channel 5 - zingTrader",
+        "scopes": UPLOAD_SCOPES,
         "times": ((10, 0), (18, 0)),
         "token": "youtube_token_zingtrader.json",
         "metadata": "youtube_channel_zingtrader.json",
