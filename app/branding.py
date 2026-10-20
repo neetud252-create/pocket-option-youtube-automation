@@ -4,17 +4,39 @@ from flask import Blueprint, Response
 
 
 branding = Blueprint("branding", __name__)
-APP_NAME = "TraderFX Channel 3 Automation"
-SUPPORT_EMAIL = "topxcoupon@gmail.com"
+APP_PROFILES = {
+    "traderfx": {
+        "name": "TraderFX Channel 3 Automation",
+        "support_email": "topxcoupon@gmail.com",
+        "base_path": "",
+        "channel_note": "",
+    },
+    "apex": {
+        "name": "Pocket Option YouTube Automation",
+        "support_email": "neetud252@gmail.com",
+        "base_path": "/apex",
+        "channel_note": "<p>For the Apex Trader YouTube channel.</p>",
+    },
+}
 
 
-def information_page(title, body):
+def information_page(title, body, profile="traderfx"):
+    settings = APP_PROFILES[profile]
+    app_name = settings["name"]
+    support_email = settings["support_email"]
+    base_path = settings["base_path"]
+    body = body.format(
+        app_name=app_name,
+        support_email=support_email,
+        base_path=base_path,
+        channel_note=settings["channel_note"],
+    )
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title} | {APP_NAME}</title>
+  <title>{title} | {app_name}</title>
   <style>
     :root {{ color-scheme: light; }}
     body {{ margin: 0; background: #f6f8fb; color: #17243a;
@@ -33,14 +55,14 @@ def information_page(title, body):
 </head>
 <body>
 <main>
-  <div class="brand">{APP_NAME}</div>
+  <div class="brand">{app_name}</div>
   <nav aria-label="Information pages">
-    <a href="/about">Home</a>
-    <a href="/privacy">Privacy policy</a>
-    <a href="/terms">Terms of service</a>
+    <a href="{base_path}/about">Home</a>
+    <a href="{base_path}/privacy">Privacy policy</a>
+    <a href="{base_path}/terms">Terms of service</a>
   </nav>
   {body}
-  <footer>Support: <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a></footer>
+  <footer>Support: <a href="mailto:{support_email}">{support_email}</a></footer>
 </main>
 </body>
 </html>"""
@@ -48,9 +70,11 @@ def information_page(title, body):
 
 
 @branding.get("/about")
-def about():
+@branding.get("/apex/about", defaults={"profile": "apex"})
+def about(profile="traderfx"):
     return information_page("Home", """
-<h1>TraderFX Channel 3 Automation</h1>
+<h1>{app_name}</h1>
+{channel_note}
 <p>A tool for the channel operator to prepare, upload, and schedule videos
 on an authorised YouTube channel. It runs as part of the Pocket Option
 YouTube Automation service.</p>
@@ -67,19 +91,20 @@ stores an offline authorisation token so scheduled work can run without
 repeated sign-in. Access can be revoked through your Google Account.</p>
 <p>This is an operator-managed tool for authorised channels. It is not a
 public account-registration service.</p>
-<p>Read the <a href="/privacy">privacy policy</a> for data use, storage,
-and removal information, and the <a href="/terms">terms of service</a>
+<p>Read the <a href="{base_path}/privacy">privacy policy</a> for data use, storage,
+and removal information, and the <a href="{base_path}/terms">terms of service</a>
 for conditions of use.</p>
-""")
+""", profile)
 
 
 @branding.get("/privacy")
-def privacy():
+@branding.get("/apex/privacy", defaults={"profile": "apex"})
+def privacy(profile="traderfx"):
     return information_page("Privacy policy", """
 <h1>Privacy policy</h1>
 <p class="date">Effective 20 October 2026</p>
-<p>This policy covers the YouTube channel integration of TraderFX Channel 3
-Automation, operated as part of the Pocket Option YouTube Automation service.
+<p>This policy covers the YouTube channel integration of {app_name},
+operated as part of the Pocket Option YouTube Automation service.
 It describes this integration's handling of Google user data.</p>
 <h2>Information accessed and stored</h2>
 <p>With your Google authorisation, the integration accesses the selected
@@ -119,22 +144,23 @@ upload records or remove videos already uploaded to YouTube.</p>
 <p>You can revoke access in your
 <a href="https://myaccount.google.com/connections">Google Account connections</a>.
 To request removal of stored tokens or channel data, contact
-<a href="mailto:topxcoupon@gmail.com">topxcoupon@gmail.com</a> and identify
+<a href="mailto:{support_email}">{support_email}</a> and identify
 the channel concerned. Do not send passwords or OAuth tokens. Videos
 already on YouTube can be managed in YouTube Studio.</p>
 <h2>Questions and changes</h2>
 <p>Contact the support address below with privacy questions. Updates to
 this policy will be published on this page with a revised effective date.</p>
-""")
+""", profile)
 
 
 @branding.get("/terms")
-def terms():
+@branding.get("/apex/terms", defaults={"profile": "apex"})
+def terms(profile="traderfx"):
     return information_page("Terms of service", """
 <h1>Terms of service</h1>
 <p class="date">Effective 20 October 2026</p>
 <h2>Purpose and authorised use</h2>
-<p>TraderFX Channel 3 Automation is an operator-managed video upload and
+<p>{app_name} is an operator-managed video upload and
 scheduling tool. Use it only for YouTube channels you own or are authorised
 to manage. It is not a public account-registration service.</p>
 <h2>Uploads and scheduling</h2>
@@ -155,7 +181,7 @@ Revoking access stops future authorised API operations but does not
 automatically cancel videos already scheduled on YouTube; manage those
 videos in YouTube Studio.</p>
 <h2>Privacy and support</h2>
-<p>The <a href="/privacy">privacy policy</a> explains the integration's data
+<p>The <a href="{base_path}/privacy">privacy policy</a> explains the integration's data
 handling and how to request removal of stored channel information.
-For support, contact <a href="mailto:topxcoupon@gmail.com">topxcoupon@gmail.com</a>.</p>
-""")
+For support, contact <a href="mailto:{support_email}">{support_email}</a>.</p>
+""", profile)
